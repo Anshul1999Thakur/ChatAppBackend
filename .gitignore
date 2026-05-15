@@ -1,0 +1,44 @@
+*.swp
+*.dll
+*.*~
+project.lock.json
+.DS_Store
+*.pyc
+nupkg/
+
+# Visual Studio Code
+.vscode
+
+# Rider
+.idea
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+build/
+bld/
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+Internal_API/StorageDataContracts/[Oo]bj/
+Internal_API/StorageDataContracts/[Bb]in/
+Internal_API/AzureTableFunctions/[Bb]in/
+Internal_API/AzureTableFunctions/[Oo]bj/
+msbuild.log
+msbuild.err
+msbuild.wrn
+
+# Visual Studio 2015
+.vs/
+/SafetyBehaviourManagement/Properties/PublishProfiles/FolderProfile.pubxml
+/SafetyBehaviourManagement/Properties/PublishProfiles/FolderProfile.pubxml
