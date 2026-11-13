@@ -1,15 +1,29 @@
-﻿namespace ChatApp.Models
+﻿using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
+
+namespace ChatApp.Models
 {
     public class GroupMessage
     {
-        public int Id { get; set; }
+        [BsonId]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string Id { get; set; } = string.Empty;
 
-        public int GroupId { get; set; }
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string GroupId { get; set; } = string.Empty;
 
-        public int SenderId { get; set; }
+        public string SenderId { get; set; } = string.Empty;
 
-        public string Message { get; set; }
+        public string SenderName { get; set; } = string.Empty;
 
-        public DateTime CreatedAt { get; set; } = DateTime.Now;
+        public string EncryptedText { get; set; } = string.Empty;
+
+        public string? StickerUrl { get; set; }
+
+        public bool IsSticker { get; set; } = false;
+
+        public bool IsSystemMessage { get; set; } = false;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 }

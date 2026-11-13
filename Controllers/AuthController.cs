@@ -1,9 +1,8 @@
-﻿using ChatApp.Data;
+using ChatApp.Common;
 using ChatApp.DTOs;
-using ChatApp.Helpers;
-using ChatApp.Models;
+using ChatApp.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using MongoDB.Driver;
 
 namespace ChatApp.Controllers
 {
@@ -11,69 +10,72 @@ namespace ChatApp.Controllers
     [Route("api/auth")]
     public class AuthController : ControllerBase
     {
-        private readonly MongoDbContext _context;
-        private readonly IConfiguration _config;
+        private readonly IAuthService _authService;
 
-        public AuthController(
-            MongoDbContext context,
-            IConfiguration config)
+        public AuthController(IAuthService authService)
         {
-            _context = context;
-            _config = config;
+            _authService = authService;
         }
 
         [HttpPost("register")]
-        public async Task<IActionResult> Register(RegisterDto dto)
+        public async Task<IActionResult> Register([FromBody] RegisterDto dto)
         {
-            var existingUser = await _context.Users
-                .Find(x => x.Email == dto.Email)
-                .FirstOrDefaultAsync();
+            var ip = GetClientIp();
+            var result = await _authService.RegisterAsync(dto, ip);
 
-            if (existingUser != null)
-                return BadRequest("Email already exists");
-
-            var user = new User
+            // Backward compatibility with frontend expecting token and string
+            return Ok(new
             {
-                FullName = dto.FullName,
-                Email = dto.Email,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
-                IsOnline = false
-            };
-
-            await _context.Users.InsertOneAsync(user);
-
-            return Ok("Registered Successfully");
+                success = true,
+                message = "Registered Successfully",
+                token = result.Token,
+                refreshToken = result.RefreshToken,
+                userId = result.UserId,
+                name = result.FullName,
+                data = result
+            });
         }
 
         [HttpPost("login")]
-        public async Task<IActionResult> Login(LoginDto dto)
+        public async Task<IActionResult> Login([FromBody] LoginDto dto)
         {
-            var user = await _context.Users
-                .Find(x => x.Email == dto.Email)
-                .FirstOrDefaultAsync();
+            var ip = GetClientIp();
+            var result = await _authService.LoginAsync(dto, ip);
 
-            if (user == null)
-                return BadRequest("User not found");
-
-            bool valid = BCrypt.Net.BCrypt.Verify(
-                dto.Password,
-                user.PasswordHash);
-
-            if (!valid)
-                return BadRequest("Wrong password");
-
-            var token = JwtHelper.GenerateToken(
-                user.Id,
-                user.FullName,
-                user.Email,
-                _config["Jwt:Key"]);
-
+            // Returns format expected by frontend while providing all rich data
             return Ok(new
             {
-                token,
-                userId = user.Id,
-                name = user.FullName
+                success = true,
+                message = "Login successful",
+                token = result.Token,
+                refreshToken = result.RefreshToken,
+                userId = result.UserId,
+                name = result.FullName,
+                data = result
             });
+        }
+
+        [HttpPost("refresh-token")]
+        public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequestDto dto)
+        {
+            var ip = GetClientIp();
+            var result = await _authService.RefreshTokenAsync(dto.RefreshToken, ip);
+            return Ok(ApiResponse<AuthResponseDto>.Ok(result, "Token refreshed successfully"));
+        }
+
+        [Authorize]
+        [HttpPost("logout")]
+        public async Task<IActionResult> Logout([FromBody] RefreshTokenRequestDto? dto)
+        {
+            var userId = User.GetUserId();
+            var ip = GetClientIp();
+            await _authService.LogoutAsync(userId, dto?.RefreshToken, ip);
+            return Ok(ApiResponse.Ok("Logged out successfully"));
+        }
+
+        private string? GetClientIp()
+        {
+            return HttpContext.Connection.RemoteIpAddress?.ToString();
         }
     }
 }

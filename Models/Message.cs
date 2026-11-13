@@ -7,13 +7,15 @@ namespace ChatApp.Models
     {
         [BsonId]
         [BsonRepresentation(BsonType.ObjectId)]
-        public string Id { get; set; }
+        public string Id { get; set; } = string.Empty;
 
-        public string SenderId { get; set; }
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string SenderId { get; set; } = string.Empty;
 
-        public string ReceiverId { get; set; }
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string ReceiverId { get; set; } = string.Empty;
 
-        public string EncryptedText { get; set; }
+        public string EncryptedText { get; set; } = string.Empty;
 
         public string? StickerUrl { get; set; }
 

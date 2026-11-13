@@ -1,13 +1,28 @@
-﻿namespace ChatApp.Models
+﻿using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
+
+namespace ChatApp.Models
 {
     public class ChatGroup
     {
-        public int Id { get; set; }
+        [BsonId]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string Id { get; set; } = string.Empty;
 
-        public string GroupName { get; set; }
+        public string Name { get; set; } = string.Empty;
 
-        public string CreatedBy { get; set; }
+        public string? Description { get; set; }
 
-        public DateTime CreatedAt { get; set; } = DateTime.Now;
+        public string? ImageUrl { get; set; }
+
+        public string CreatedBy { get; set; } = string.Empty;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        public DateTime? UpdatedAt { get; set; }
+
+        public bool IsDeleted { get; set; } = false;
+
+        public DateTime? DeletedAt { get; set; }
     }
 }

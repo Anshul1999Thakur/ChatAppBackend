@@ -1,4 +1,4 @@
-﻿using ChatApp.Models;
+using ChatApp.Models;
 using MongoDB.Driver;
 
 namespace ChatApp.Data
@@ -9,11 +9,15 @@ namespace ChatApp.Data
 
         public MongoDbContext(IConfiguration config)
         {
-            var client = new MongoClient(
-                config["MongoDbSettings:ConnectionString"]);
+            var connectionString = config["MongoDbSettings:ConnectionString"]
+                ?? Environment.GetEnvironmentVariable("MONGO_CONNECTION_STRING")
+                ?? "mongodb://localhost:27017";
 
-            _database = client.GetDatabase(
-                config["MongoDbSettings:DatabaseName"]);
+            var databaseName = config["MongoDbSettings:DatabaseName"]
+                ?? "ChatAppDb";
+
+            var client = new MongoClient(connectionString);
+            _database = client.GetDatabase(databaseName);
         }
 
         public IMongoCollection<User> Users =>
@@ -24,5 +28,76 @@ namespace ChatApp.Data
 
         public IMongoCollection<Sticker> Stickers =>
             _database.GetCollection<Sticker>("Stickers");
+
+        public IMongoCollection<ChatGroup> ChatGroups =>
+            _database.GetCollection<ChatGroup>("ChatGroups");
+
+        public IMongoCollection<GroupMember> GroupMembers =>
+            _database.GetCollection<GroupMember>("GroupMembers");
+
+        public IMongoCollection<GroupMessage> GroupMessages =>
+            _database.GetCollection<GroupMessage>("GroupMessages");
+
+        public IMongoCollection<RefreshToken> RefreshTokens =>
+            _database.GetCollection<RefreshToken>("RefreshTokens");
+
+        public async Task InitializeIndexesAsync()
+        {
+            try
+            {
+                // Users: Unique email
+                var userEmailIndex = new CreateIndexModel<User>(
+                    Builders<User>.IndexKeys.Ascending(u => u.Email),
+                    new CreateIndexOptions { Unique = true });
+                await Users.Indexes.CreateOneAsync(userEmailIndex);
+
+                // Messages: Sender/Receiver/CreatedAt compound
+                var messageCompoundIndex = new CreateIndexModel<Message>(
+                    Builders<Message>.IndexKeys
+                        .Ascending(m => m.SenderId)
+                        .Ascending(m => m.ReceiverId)
+                        .Descending(m => m.CreatedAt));
+                await Messages.Indexes.CreateOneAsync(messageCompoundIndex);
+
+                var messageReceiverIndex = new CreateIndexModel<Message>(
+                    Builders<Message>.IndexKeys
+                        .Ascending(m => m.ReceiverId)
+                        .Ascending(m => m.IsSeen));
+                await Messages.Indexes.CreateOneAsync(messageReceiverIndex);
+
+                // ChatGroups: IsDeleted and CreatedBy
+                var groupDeletedIndex = new CreateIndexModel<ChatGroup>(
+                    Builders<ChatGroup>.IndexKeys.Ascending(g => g.IsDeleted));
+                await ChatGroups.Indexes.CreateOneAsync(groupDeletedIndex);
+
+                // GroupMembers: Compound unique on GroupId + UserId
+                var memberUniqueIndex = new CreateIndexModel<GroupMember>(
+                    Builders<GroupMember>.IndexKeys
+                        .Ascending(m => m.GroupId)
+                        .Ascending(m => m.UserId),
+                    new CreateIndexOptions { Unique = true });
+                await GroupMembers.Indexes.CreateOneAsync(memberUniqueIndex);
+
+                var memberUserIndex = new CreateIndexModel<GroupMember>(
+                    Builders<GroupMember>.IndexKeys.Ascending(m => m.UserId));
+                await GroupMembers.Indexes.CreateOneAsync(memberUserIndex);
+
+                // GroupMessages: Compound on GroupId + CreatedAt
+                var groupMessageIndex = new CreateIndexModel<GroupMessage>(
+                    Builders<GroupMessage>.IndexKeys
+                        .Ascending(m => m.GroupId)
+                        .Descending(m => m.CreatedAt));
+                await GroupMessages.Indexes.CreateOneAsync(groupMessageIndex);
+
+                // RefreshTokens: Token and UserId
+                var refreshTokenIndex = new CreateIndexModel<RefreshToken>(
+                    Builders<RefreshToken>.IndexKeys.Ascending(t => t.Token));
+                await RefreshTokens.Indexes.CreateOneAsync(refreshTokenIndex);
+            }
+            catch
+            {
+                // Indexes might already exist or running in offline mode
+            }
+        }
     }
 }

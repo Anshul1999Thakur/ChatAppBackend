@@ -1,67 +1,43 @@
-﻿using ChatApp.Data;
-using ChatApp.Helpers;
+﻿using ChatApp.Common;
+using ChatApp.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using MongoDB.Driver;
 
 namespace ChatApp.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/users")]
     public class UsersController : ControllerBase
     {
-        private readonly MongoDbContext _context;
-        private readonly EncryptionHelper _crypto;
+        private readonly IUserService _userService;
 
-        public UsersController(
-            MongoDbContext context,
-            EncryptionHelper crypto)
+        public UsersController(IUserService userService)
         {
-            _context = context;
-            _crypto = crypto;
+            _userService = userService;
         }
 
-        [HttpGet("{currentUserId}")]
-        public async Task<IActionResult> GetUsers(string currentUserId)
+        [HttpGet]
+        public async Task<IActionResult> GetUsers()
         {
-            var users = await _context.Users
-                .Find(x => x.Id != currentUserId)
-                .ToListAsync();
+            var currentUserId = User.GetUserId();
+            var result = await _userService.GetUserDirectoryAsync(currentUserId);
+            return Ok(result);
+        }
 
-            var result = new List<object>();
+        // Backward compatibility overload for existing frontend calling /api/users/{currentUserId}
+        [HttpGet("{currentUserId}")]
+        public async Task<IActionResult> GetUsersForId(string currentUserId)
+        {
+            var authenticatedId = User.GetUserId();
 
-            foreach (var user in users)
+            // Validate caller is requesting their own contact directory
+            if (!string.Equals(authenticatedId, currentUserId, StringComparison.OrdinalIgnoreCase))
             {
-                var unreadCount = await _context.Messages
-                    .CountDocumentsAsync(m =>
-                        m.SenderId == user.Id &&
-                        m.ReceiverId == currentUserId &&
-                        m.IsSeen == false);
-
-                var lastMsg = await _context.Messages
-                    .Find(m =>
-                        (m.SenderId == user.Id &&
-                         m.ReceiverId == currentUserId)
-
-                         ||
-
-                        (m.SenderId == currentUserId &&
-                         m.ReceiverId == user.Id))
-                    .SortByDescending(m => m.CreatedAt)
-                    .FirstOrDefaultAsync();
-
-                result.Add(new
-                {
-                    user.Id,
-                    user.FullName,
-                    user.Email,
-                    user.IsOnline,
-                    unreadCount,
-                    lastMessage = lastMsg == null
-                        ? ""
-                        : _crypto.Decrypt(lastMsg.EncryptedText)
-                });
+                throw new ForbiddenException("Cannot access user directory on behalf of another user");
             }
 
+            var result = await _userService.GetUserDirectoryAsync(authenticatedId);
             return Ok(result);
         }
     }

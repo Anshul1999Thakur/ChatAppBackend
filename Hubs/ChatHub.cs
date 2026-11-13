@@ -1,304 +1,278 @@
-﻿using ChatApp.Data;
-using ChatApp.Helpers;
+using ChatApp.Common;
 using ChatApp.Models;
+using ChatApp.Repositories;
+using ChatApp.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
-using MongoDB.Driver;
 using System.Collections.Concurrent;
 
 namespace ChatApp.Hubs
 {
+    [Authorize]
     public class ChatHub : Hub
     {
-        private readonly MongoDbContext _context;
-        private readonly EncryptionHelper _crypto;
+        private readonly IMessageService _messageService;
+        private readonly IGroupMessageService _groupMessageService;
+        private readonly IGroupMemberRepository _groupMemberRepo;
+        private readonly IUserRepository _userRepo;
+        private readonly IMessageRepository _messageRepo;
+        private readonly ILogger<ChatHub> _logger;
 
-        // userId(string) => connectionId
-        public static ConcurrentDictionary<string, string> OnlineUsers
-            = new ConcurrentDictionary<string, string>();
+        // Thread-safe multi-connection mapping: userId -> Set of connectionIds
+        public static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> OnlineUsers = new();
 
         public ChatHub(
-            MongoDbContext context,
-            EncryptionHelper crypto)
+            IMessageService messageService,
+            IGroupMessageService groupMessageService,
+            IGroupMemberRepository groupMemberRepo,
+            IUserRepository userRepo,
+            IMessageRepository messageRepo,
+            ILogger<ChatHub> logger)
         {
-            _context = context;
-            _crypto = crypto;
+            _messageService = messageService;
+            _groupMessageService = groupMessageService;
+            _groupMemberRepo = groupMemberRepo;
+            _userRepo = userRepo;
+            _messageRepo = messageRepo;
+            _logger = logger;
         }
 
         public override async Task OnConnectedAsync()
         {
+            var userId = Context.User.TryGetUserId();
+            if (!string.IsNullOrEmpty(userId))
+            {
+                await TrackUserConnectionAsync(userId, Context.ConnectionId);
+            }
+
             await base.OnConnectedAsync();
         }
 
-        // FRONTEND:
-        // connection.invoke("RegisterUser", userId)
-
-        public async Task RegisterUser(string userId)
+        public override async Task OnDisconnectedAsync(Exception? exception)
         {
-            OnlineUsers[userId] = Context.ConnectionId;
-
-            var update = Builders<User>.Update
-                .Set(x => x.IsOnline, true)
-                .Set(x => x.LastSeen, DateTime.UtcNow);
-
-            await _context.Users.UpdateOneAsync(
-                x => x.Id == userId,
-                update);
-
-            // user online broadcast
-            await Clients.All.SendAsync("UserOnline", userId);
-
-            // ✅ old undelivered messages delivered
-            var pendingFilter = Builders<Message>.Filter.And(
-                Builders<Message>.Filter.Eq(x => x.ReceiverId, userId),
-                Builders<Message>.Filter.Eq(x => x.IsDelivered, false)
-            );
-
-            var pendingMessages = await _context.Messages
-                .Find(pendingFilter)
-                .ToListAsync();
-
-            if (pendingMessages.Count > 0)
+            var userId = Context.User.TryGetUserId();
+            if (!string.IsNullOrEmpty(userId))
             {
-                await _context.Messages.UpdateManyAsync(
-                    pendingFilter,
-                    Builders<Message>.Update.Set(x => x.IsDelivered, true)
-                );
-
-                foreach (var msg in pendingMessages)
+                await RemoveUserConnectionAsync(userId, Context.ConnectionId);
+            }
+            else
+            {
+                // Fallback scan if claim was missing
+                foreach (var pair in OnlineUsers)
                 {
-                    if (OnlineUsers.TryGetValue(msg.SenderId, out var senderConn))
+                    if (pair.Value.ContainsKey(Context.ConnectionId))
                     {
-                        await Clients.Client(senderConn)
-                            .SendAsync("MessageDelivered", msg.Id);
+                        await RemoveUserConnectionAsync(pair.Key, Context.ConnectionId);
+                        break;
+                    }
+                }
+            }
+
+            await base.OnDisconnectedAsync(exception);
+        }
+
+        // Backward compatibility method for existing frontend
+        public async Task RegisterUser(string? clientSuppliedUserId)
+        {
+            var authenticatedUserId = Context.User.TryGetUserId() ?? clientSuppliedUserId;
+            if (!string.IsNullOrEmpty(authenticatedUserId))
+            {
+                await TrackUserConnectionAsync(authenticatedUserId, Context.ConnectionId);
+            }
+        }
+
+        // ==========================================
+        // 1-ON-1 MESSAGING
+        // ==========================================
+
+        public async Task SendMessage(string receiverId, string text)
+        {
+            var senderId = Context.User.GetUserId();
+            if (string.IsNullOrEmpty(senderId)) return;
+
+            var msg = await _messageService.SendMessageAsync(senderId, receiverId, text);
+
+            var receiverConnections = GetUserConnections(receiverId);
+            if (receiverConnections.Count > 0)
+            {
+                msg.IsDelivered = true;
+                // Emit both standard events for frontend compatibility
+                await Clients.Clients(receiverConnections).SendAsync("ReceiveMessage", msg);
+                await Clients.Clients(receiverConnections).SendAsync("MessageReceived", msg);
+            }
+
+            // Also emit to all sender's connections (other open tabs/devices)
+            var senderConnections = GetUserConnections(senderId);
+            await Clients.Clients(senderConnections).SendAsync("ReceiveMessage", msg);
+            await Clients.Clients(senderConnections).SendAsync("MessageReceived", msg);
+        }
+
+        public async Task SendSticker(string receiverId, string stickerUrl)
+        {
+            var senderId = Context.User.GetUserId();
+            if (string.IsNullOrEmpty(senderId)) return;
+
+            var msg = await _messageService.SendStickerAsync(senderId, receiverId, stickerUrl);
+
+            var receiverConnections = GetUserConnections(receiverId);
+            if (receiverConnections.Count > 0)
+            {
+                msg.IsDelivered = true;
+                await Clients.Clients(receiverConnections).SendAsync("ReceiveMessage", msg);
+                await Clients.Clients(receiverConnections).SendAsync("MessageReceived", msg);
+            }
+
+            var senderConnections = GetUserConnections(senderId);
+            await Clients.Clients(senderConnections).SendAsync("ReceiveMessage", msg);
+            await Clients.Clients(senderConnections).SendAsync("MessageReceived", msg);
+        }
+
+        public async Task MarkSeen(string senderId)
+        {
+            var currentUserId = Context.User.GetUserId();
+            if (string.IsNullOrEmpty(currentUserId)) return;
+
+            await _messageService.MarkSeenAsync(currentUserId, senderId);
+
+            var senderConnections = GetUserConnections(senderId);
+            if (senderConnections.Count > 0)
+            {
+                await Clients.Clients(senderConnections).SendAsync("MessagesSeen", currentUserId);
+            }
+        }
+
+        public async Task UserTyping(string receiverId, bool isTyping = true)
+        {
+            var senderId = Context.User.GetUserId();
+            if (string.IsNullOrEmpty(senderId)) return;
+
+            var receiverConnections = GetUserConnections(receiverId);
+            if (receiverConnections.Count > 0)
+            {
+                await Clients.Clients(receiverConnections).SendAsync("UserTyping", new { senderId, isTyping });
+                if (!isTyping)
+                {
+                    await Clients.Clients(receiverConnections).SendAsync("UserStoppedTyping", senderId);
+                }
+            }
+        }
+
+        public async Task UserStoppedTyping(string receiverId)
+        {
+            await UserTyping(receiverId, false);
+        }
+
+        // ==========================================
+        // GROUP CHAT REAL-TIME
+        // ==========================================
+
+        public async Task JoinGroup(string groupId)
+        {
+            var userId = Context.User.GetUserId();
+            var membership = await _groupMemberRepo.GetMembershipAsync(groupId, userId);
+            if (membership == null)
+            {
+                throw new HubException("Unauthorized to join this group room");
+            }
+
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"group_{groupId}");
+        }
+
+        public async Task LeaveGroup(string groupId)
+        {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"group_{groupId}");
+        }
+
+        public async Task SendGroupMessage(string groupId, string text)
+        {
+            var senderId = Context.User.GetUserId();
+            var msg = await _groupMessageService.SendGroupMessageAsync(groupId, senderId, text);
+
+            await Clients.Group($"group_{groupId}").SendAsync("ReceiveGroupMessage", msg);
+            await Clients.Group($"group_{groupId}").SendAsync("GroupMessageReceived", msg);
+        }
+
+        public async Task SendGroupSticker(string groupId, string stickerUrl)
+        {
+            var senderId = Context.User.GetUserId();
+            var msg = await _groupMessageService.SendGroupStickerAsync(groupId, senderId, stickerUrl);
+
+            await Clients.Group($"group_{groupId}").SendAsync("ReceiveGroupMessage", msg);
+            await Clients.Group($"group_{groupId}").SendAsync("GroupMessageReceived", msg);
+        }
+
+        public async Task GroupTyping(string groupId, bool isTyping)
+        {
+            var senderId = Context.User.GetUserId();
+            var senderName = Context.User.GetFullName();
+
+            await Clients.OthersInGroup($"group_{groupId}").SendAsync("GroupUserTyping", new
+            {
+                groupId,
+                userId = senderId,
+                userName = senderName,
+                isTyping
+            });
+        }
+
+        // ==========================================
+        // CONNECTION TRACKING HELPERS
+        // ==========================================
+
+        private async Task TrackUserConnectionAsync(string userId, string connectionId)
+        {
+            var set = OnlineUsers.GetOrAdd(userId, _ => new ConcurrentDictionary<string, byte>());
+            bool isFirstConnection = set.IsEmpty;
+            set[connectionId] = 0;
+
+            if (isFirstConnection)
+            {
+                await _userRepo.UpdateOnlineStatusAsync(userId, true);
+                await Clients.All.SendAsync("UserOnline", userId);
+            }
+
+            // Deliver pending messages to this user
+            var pending = await _messageRepo.GetPendingDeliveredMessagesAsync(userId);
+            if (pending.Count > 0)
+            {
+                await _messageRepo.MarkMessagesAsDeliveredAsync(userId);
+                foreach (var msg in pending)
+                {
+                    var senderConnections = GetUserConnections(msg.SenderId);
+                    if (senderConnections.Count > 0)
+                    {
+                        await Clients.Clients(senderConnections).SendAsync("MessageDelivered", msg.Id);
                     }
                 }
             }
         }
 
-        // FRONTEND:
-        // connection.invoke("SendMessage", receiverId, text)
-
-        public async Task SendMessage(
-            string receiverId,
-            string text)
+        private async Task RemoveUserConnectionAsync(string userId, string connectionId)
         {
-            var senderId = OnlineUsers
-                .FirstOrDefault(x =>
-                    x.Value == Context.ConnectionId)
-                .Key;
-
-            if (string.IsNullOrEmpty(senderId))
-                return;
-
-            var msg = new Message
+            if (OnlineUsers.TryGetValue(userId, out var set))
             {
-                SenderId = senderId,
-                ReceiverId = receiverId,
-                EncryptedText = _crypto.Encrypt(text),
-                CreatedAt = DateTime.UtcNow,
-                IsDelivered =
-                    OnlineUsers.ContainsKey(receiverId),
-                IsSeen = false
-            };
-
-            await _context.Messages
-                .InsertOneAsync(msg);
-
-            var payload = new
-            {
-                Id = msg.Id,
-                SenderId = msg.SenderId,
-                ReceiverId = msg.ReceiverId,
-                Text = text,
-                CreatedAt = msg.CreatedAt,
-                IsDelivered = msg.IsDelivered,
-                IsSeen = msg.IsSeen
-            };
-
-            // Receiver
-            if (OnlineUsers.TryGetValue(
-                receiverId,
-                out var receiverConnId))
-            {
-                await Clients.Client(receiverConnId)
-                    .SendAsync(
-                        "ReceiveMessage",
-                        payload);
-            }
-
-            // Sender
-            await Clients.Caller.SendAsync(
-                "ReceiveMessage",
-                payload);
-        }
-
-        public async Task SendSticker(
-    string receiverId,
-    string stickerUrl)
-        {
-            var senderId = OnlineUsers
-                .FirstOrDefault(x =>
-                    x.Value == Context.ConnectionId)
-                .Key;
-
-            if (string.IsNullOrEmpty(senderId))
-                return;
-
-            var msg = new Message
-            {
-                SenderId = senderId,
-                ReceiverId = receiverId,
-
-                StickerUrl = stickerUrl,
-                IsSticker = true,
-
-                EncryptedText =
-                    _crypto.Encrypt("Sticker"),
-
-                CreatedAt = DateTime.UtcNow,
-
-                IsDelivered =
-                    OnlineUsers.ContainsKey(receiverId),
-
-                IsSeen = false
-            };
-
-            await _context.Messages
-                .InsertOneAsync(msg);
-
-            var payload = new
-            {
-                Id = msg.Id,
-
-                SenderId = msg.SenderId,
-
-                ReceiverId = msg.ReceiverId,
-
-                Text = "Sticker",
-
-                StickerUrl = msg.StickerUrl,
-
-                IsSticker = msg.IsSticker,
-
-                CreatedAt = msg.CreatedAt,
-
-                IsDelivered = msg.IsDelivered,
-
-                IsSeen = msg.IsSeen
-            };
-
-            // Receiver
-            if (OnlineUsers.TryGetValue(
-                receiverId,
-                out var receiverConnId))
-            {
-                await Clients.Client(receiverConnId)
-                    .SendAsync(
-                        "ReceiveMessage",
-                        payload);
-            }
-
-            // Sender
-            await Clients.Caller.SendAsync(
-                "ReceiveMessage",
-                payload);
-        }
-
-        public async Task MarkSeen(
-            string senderId)
-        {
-            var myId = OnlineUsers
-                .FirstOrDefault(x =>
-                    x.Value == Context.ConnectionId)
-                .Key;
-
-            if (string.IsNullOrEmpty(myId))
-                return;
-
-            var update = Builders<Message>.Update
-                .Set(x => x.IsSeen, true);
-
-            await _context.Messages
-                .UpdateManyAsync(
-                    x =>
-                        x.SenderId == senderId &&
-                        x.ReceiverId == myId &&
-                        x.IsSeen == false,
-                    update);
-
-            if (OnlineUsers.TryGetValue(
-                senderId,
-                out var connId))
-            {
-                await Clients.Client(connId)
-                    .SendAsync(
-                        "MessagesSeen",
-                        myId);
+                set.TryRemove(connectionId, out _);
+                if (set.IsEmpty)
+                {
+                    OnlineUsers.TryRemove(userId, out _);
+                    await _userRepo.UpdateOnlineStatusAsync(userId, false);
+                    await Clients.All.SendAsync("UserOffline", userId);
+                }
             }
         }
 
-        public async Task UserTyping(
-            string receiverId,
-            bool isTyping)
+        public static IReadOnlyList<string> GetUserConnections(string userId)
         {
-            var senderId = OnlineUsers
-                .FirstOrDefault(x =>
-                    x.Value == Context.ConnectionId)
-                .Key;
-
-            if (string.IsNullOrEmpty(senderId))
-                return;
-
-            if (OnlineUsers.TryGetValue(
-                receiverId,
-                out var connId))
+            if (OnlineUsers.TryGetValue(userId, out var set))
             {
-                await Clients.Client(connId)
-                    .SendAsync(
-                        "UserTyping",
-                        new
-                        {
-                            senderId,
-                            isTyping
-                        });
+                return set.Keys.ToList();
             }
+            return Array.Empty<string>();
         }
 
-        public override async Task OnDisconnectedAsync(
-            Exception? ex)
+        public static bool IsUserOnline(string userId)
         {
-            var user = OnlineUsers
-                .FirstOrDefault(x =>
-                    x.Value == Context.ConnectionId);
-
-            if (!string.IsNullOrEmpty(user.Key))
-            {
-                OnlineUsers.TryRemove(
-                    user.Key,
-                    out _);
-
-                var update = Builders<User>.Update
-                    .Set(x => x.IsOnline, false)
-                    .Set(x => x.LastSeen, DateTime.UtcNow);
-
-                await _context.Users
-                    .UpdateOneAsync(
-                        x => x.Id == user.Key,
-                        update);
-
-                await Clients.All.SendAsync(
-                    "UserOffline",
-                    user.Key);
-            }
-
-            await base.OnDisconnectedAsync(ex);
-        }
-
-        public static bool IsUserOnline(
-            string userId)
-        {
-            return OnlineUsers
-                .ContainsKey(userId);
+            return OnlineUsers.TryGetValue(userId, out var set) && !set.IsEmpty;
         }
     }
 }

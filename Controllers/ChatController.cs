@@ -1,28 +1,31 @@
-﻿using ChatApp.Data;
-using ChatApp.Helpers;
+using ChatApp.Common;
+using ChatApp.Data;
+using ChatApp.DTOs;
 using ChatApp.Models;
+using ChatApp.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Driver;
-using System.Text;
 using System.Text.Json;
 
 namespace ChatApp.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/chat")]
     public class ChatController : ControllerBase
     {
+        private readonly IMessageService _messageService;
         private readonly MongoDbContext _db;
-        private readonly EncryptionHelper _crypto;
         private readonly IConfiguration _config;
 
         public ChatController(
+            IMessageService messageService,
             MongoDbContext db,
-            EncryptionHelper crypto,
             IConfiguration config)
         {
+            _messageService = messageService;
             _db = db;
-            _crypto = crypto;
             _config = config;
         }
 
@@ -31,340 +34,198 @@ namespace ChatApp.Controllers
         // =====================================
         [HttpPost("send")]
         public async Task<IActionResult> Send(
-            string senderId,
-            string receiverId,
-            string text)
+            [FromQuery] string? senderId,
+            [FromQuery] string? receiverId,
+            [FromQuery] string? text,
+            [FromBody] SendMessageRequestDto? body = null)
         {
-            var msg = new Message
+            var authenticatedId = User.GetUserId();
+
+            // Extract values preferring body then query
+            var effectiveReceiverId = body?.ReceiverId ?? receiverId;
+            var effectiveText = body?.Text ?? text;
+
+            if (string.IsNullOrWhiteSpace(effectiveReceiverId) || string.IsNullOrWhiteSpace(effectiveText))
             {
-                SenderId = senderId,
-                ReceiverId = receiverId,
-                EncryptedText = _crypto.Encrypt(text)
-            };
+                throw new BadRequestException("Receiver ID and message text are required");
+            }
 
-            await _db.Messages.InsertOneAsync(msg);
-
-            return Ok("Message Sent");
+            // Security: Never trust client-provided senderId if it differs from authenticated user
+            var result = await _messageService.SendMessageAsync(authenticatedId, effectiveReceiverId, effectiveText);
+            return Ok(result);
         }
 
         // =====================================
-        // CHAT HISTORY
+        // CHAT HISTORY (Clean Route)
+        // =====================================
+        [HttpGet("history/{otherUserId}")]
+        public async Task<IActionResult> HistorySingle(
+            string otherUserId,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 30)
+        {
+            var authenticatedId = User.GetUserId();
+            var result = await _messageService.GetConversationHistoryAsync(authenticatedId, otherUserId, page, pageSize);
+            return Ok(result);
+        }
+
+        // =====================================
+        // CHAT HISTORY (Backward Compatibility)
         // =====================================
         [HttpGet("history/{user1}/{user2}")]
         public async Task<IActionResult> History(
             string user1,
             string user2,
-            int page = 1,
-            int pageSize = 30)
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 30)
         {
-            var data = await _db.Messages
-                .Find(x =>
-                    (x.SenderId == user1 &&
-                     x.ReceiverId == user2) ||
+            var authenticatedId = User.GetUserId();
 
-                    (x.SenderId == user2 &&
-                     x.ReceiverId == user1))
-                .SortByDescending(x => x.CreatedAt)
-                .Skip((page - 1) * pageSize)
-                .Limit(pageSize)
-                .ToListAsync();
-
-            data.Reverse();
-
-            var result = data.Select(x => new
+            // Security: Ensure caller is one of the participants
+            if (authenticatedId != user1 && authenticatedId != user2)
             {
-                x.Id,
-                x.SenderId,
-                x.ReceiverId,
+                throw new ForbiddenException("You are not authorized to view this conversation");
+            }
 
-                Text = _crypto.Decrypt(
-                    x.EncryptedText),
-
-                x.StickerUrl,
-                x.IsSticker,
-                x.CreatedAt,
-                x.IsSeen,
-                x.IsDelivered
-            });
-
+            var otherUserId = authenticatedId == user1 ? user2 : user1;
+            var result = await _messageService.GetConversationHistoryAsync(authenticatedId, otherUserId, page, pageSize);
             return Ok(result);
         }
 
         // =====================================
-        // AI STICKER GENERATE
+        // SEND STICKER
         // =====================================
-        [HttpPost("generate-sticker")]
-        public async Task<IActionResult> GenerateSticker(string userId, string prompt)
+        [HttpPost("send-sticker")]
+        public async Task<IActionResult> SendSticker(
+            [FromQuery] string? senderId,
+            [FromQuery] string? receiverId,
+            [FromQuery] string? stickerUrl,
+            [FromBody] SendStickerRequestDto? body = null)
         {
-            try
+            var authenticatedId = User.GetUserId();
+
+            var effectiveReceiverId = body?.ReceiverId ?? receiverId;
+            var effectiveStickerUrl = body?.StickerUrl ?? stickerUrl;
+
+            if (string.IsNullOrWhiteSpace(effectiveReceiverId) || string.IsNullOrWhiteSpace(effectiveStickerUrl))
             {
-                var today = DateTime.UtcNow.Date;
-
-                // =========================
-                // AI DAILY COUNT
-                // =========================
-                var aiCount = await _db.Stickers
-                    .Find(x =>
-                        x.UserId == userId &&
-                        x.CreatedAt >= today &&
-                        x.IsAiGenerated
-                    )
-                    .CountDocumentsAsync();
-
-                string? aiImageUrl = null;
-
-                List<string> giphyList = new();
-
-                // =========================
-                // FIRST LOAD GIPHY
-                // =========================
-                try
-                {
-                    giphyList =
-                        await GetGiphyStickers(prompt);
-                }
-                catch
-                {
-                    giphyList = new List<string>();
-                }
-
-                // =========================
-                // THEN TRY AI
-                // =========================
-                //if (aiCount < 5)
-                //{
-                //    try
-                //    {
-                //        using var http = new HttpClient();
-
-                //        http.Timeout =
-                //            TimeSpan.FromSeconds(45);
-
-                //        var encodedPrompt =
-                //            Uri.EscapeDataString(
-                //                $"funny meme sticker of {prompt}, cartoon sticker, whatsapp sticker style, transparent background, clean cutout, centered object"
-                //            );
-
-                //        var response =
-                //            await http.GetAsync(
-                //                $"https://image.pollinations.ai/prompt/{encodedPrompt}?width=768&height=768&model=flux&nologo=true"
-                //            );
-
-                //        if (response.IsSuccessStatusCode)
-                //        {
-                //            var bytes =
-                //                await response.Content.ReadAsByteArrayAsync();
-
-                //            var fileName =
-                //                $"{Guid.NewGuid()}.png";
-
-                //            var folder =
-                //                Path.Combine(
-                //                    Directory.GetCurrentDirectory(),
-                //                    "wwwroot",
-                //                    "stickers"
-                //                );
-
-                //            if (!Directory.Exists(folder))
-                //            {
-                //                Directory.CreateDirectory(folder);
-                //            }
-
-                //            var path =
-                //                Path.Combine(folder, fileName);
-
-                //            var cleanBytes =
-                //                await RemoveBackground(bytes);
-
-                //            await System.IO.File.WriteAllBytesAsync(
-                //                path,
-                //                cleanBytes
-                //            );
-
-                //            aiImageUrl =
-                //                $"/stickers/{fileName}";
-                //        }
-                //    }
-                //    catch
-                //    {
-                //        // ignore AI failure
-                //    }
-                //}
-
-                // =========================
-                // FAIL SAFE
-                // =========================
-                if (
-                    string.IsNullOrEmpty(aiImageUrl) &&
-                    !giphyList.Any()
-                )
-                {
-                    return Ok(new
-                    {
-                        aiSticker = (string?)null,
-                        giphyStickers = new List<string>(),
-                        aiLimitReached = aiCount >= 5
-                    });
-                }
-
-                // =========================
-                // SAVE AI STICKER
-                // =========================
-                if (!string.IsNullOrEmpty(aiImageUrl))
-                {
-                    var sticker = new Sticker
-                    {
-                        UserId = userId,
-                        Prompt = prompt,
-                        ImageUrl = aiImageUrl,
-                        IsAiGenerated = true,
-                        CreatedAt = DateTime.UtcNow
-                    };
-
-                    await _db.Stickers.InsertOneAsync(sticker);
-                }
-
-                // =========================
-                // RESPONSE
-                // =========================
-                return Ok(new
-                {
-                    aiSticker = aiImageUrl,
-                    giphyStickers = giphyList,
-                    aiLimitReached = aiCount >= 5
-                });
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ex.Message);
-            }
-        }
-
-        private async Task<byte[]> RemoveBackground(byte[] imageBytes)
-        {
-            var apiKey = _config["RemoveBg:ApiKey"];
-
-            using var client = new HttpClient();
-
-            client.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
-
-            using var form = new MultipartFormDataContent();
-
-            form.Add(
-                new ByteArrayContent(imageBytes),
-                "image_file",
-                "image.png"
-            );
-
-            var response = await client.PostAsync(
-                "https://api.remove.bg/v1.0/removebg",
-                form
-            );
-
-            if (!response.IsSuccessStatusCode)
-                return imageBytes; 
-
-            return await response.Content.ReadAsByteArrayAsync();
-        }
-
-        private async Task<List<string>> GetGiphyStickers(string prompt)
-        {
-            var apiKey = _config["Giphy:ApiKey"];
-
-            using var http = new HttpClient();
-
-            var url =
-                $"https://api.giphy.com/v1/stickers/search?api_key={apiKey}&q={Uri.EscapeDataString(prompt)}&limit=20&rating=g";
-
-            var response = await http.GetAsync(url);
-
-            if (!response.IsSuccessStatusCode)
-                return new List<string>();
-
-            var json = await response.Content.ReadAsStringAsync();
-
-            using var doc = JsonDocument.Parse(json);
-
-            var list = new List<string>();
-
-            foreach (var item in doc.RootElement.GetProperty("data").EnumerateArray())
-            {
-                var urlStr = item.GetProperty("images")
-                                 .GetProperty("original")
-                                 .GetProperty("url")
-                                 .GetString();
-
-                list.Add(urlStr);
+                throw new BadRequestException("Receiver ID and sticker URL are required");
             }
 
-            return list;
+            var result = await _messageService.SendStickerAsync(authenticatedId, effectiveReceiverId, effectiveStickerUrl);
+            return Ok(result);
         }
-        //private async Task<string> GetGiphySticker(string prompt)
-        //{
-        //    var apiKey = _config["Giphy:ApiKey"];
 
-        //    using var http = new HttpClient();
-
-        //    var url = $"https://api.giphy.com/v1/stickers/search?api_key={apiKey}&q={Uri.EscapeDataString(prompt)}&limit=1";
-
-        //    var response = await http.GetAsync(url);
-
-        //    if (!response.IsSuccessStatusCode)
-        //        return null;
-
-        //    var json = await response.Content.ReadAsStringAsync();
-
-        //    using var doc = JsonDocument.Parse(json);
-
-        //    var data = doc.RootElement.GetProperty("data");
-
-        //    if (data.GetArrayLength() == 0)
-        //        return null;
-
-        //    return data[0]
-        //        .GetProperty("images")
-        //        .GetProperty("original")
-        //        .GetProperty("url")
-        //        .GetString();
-        //}
+        // =====================================
+        // MARK SEEN
+        // =====================================
+        [HttpPost("mark-seen/{senderId}")]
+        public async Task<IActionResult> MarkSeen(string senderId)
+        {
+            var authenticatedId = User.GetUserId();
+            await _messageService.MarkSeenAsync(authenticatedId, senderId);
+            return Ok(ApiResponse.Ok("Messages marked as seen"));
+        }
 
         // =====================================
         // GET USER STICKERS
         // =====================================
         [HttpGet("stickers/{userId}")]
-        public async Task<IActionResult> GetUserStickers(
-            string userId)
+        public async Task<IActionResult> GetUserStickers(string userId)
         {
+            var authenticatedId = User.GetUserId();
+            var targetUserId = string.IsNullOrWhiteSpace(userId) ? authenticatedId : userId;
+
             var data = await _db.Stickers
-                .Find(x => x.UserId == userId)
+                .Find(x => x.UserId == targetUserId)
                 .SortByDescending(x => x.CreatedAt)
                 .ToListAsync();
 
             return Ok(data);
         }
 
-        [HttpPost("send-sticker")]
-        public async Task<IActionResult> SendSticker(
-    string senderId,
-    string receiverId,
-    string stickerUrl)
+        // =====================================
+        // AI STICKER GENERATE
+        // =====================================
+        [HttpPost("generate-sticker")]
+        public async Task<IActionResult> GenerateSticker([FromQuery] string? userId, [FromQuery] string prompt)
         {
-            var msg = new Message
+            var authenticatedId = User.GetUserId();
+            var targetUserId = string.IsNullOrWhiteSpace(userId) ? authenticatedId : authenticatedId;
+
+            if (string.IsNullOrWhiteSpace(prompt))
+                throw new BadRequestException("Prompt cannot be empty");
+
+            try
             {
-                SenderId = senderId,
-                ReceiverId = receiverId,
+                var today = DateTime.UtcNow.Date;
 
-                StickerUrl = stickerUrl,
-                IsSticker = true,
+                var aiCount = await _db.Stickers
+                    .Find(x =>
+                        x.UserId == targetUserId &&
+                        x.CreatedAt >= today &&
+                        x.IsAiGenerated
+                    )
+                    .CountDocumentsAsync();
 
-                EncryptedText =
-                    _crypto.Encrypt("Sticker")
-            };
+                List<string> giphyList = new();
 
-            await _db.Messages
-                .InsertOneAsync(msg);
+                try
+                {
+                    giphyList = await GetGiphyStickers(prompt);
+                }
+                catch
+                {
+                    giphyList = new List<string>();
+                }
 
-            return Ok(msg);
+                return Ok(new
+                {
+                    aiSticker = (string?)null,
+                    giphyStickers = giphyList,
+                    aiLimitReached = aiCount >= 5
+                });
+            }
+            catch (Exception ex)
+            {
+                throw new BadRequestException(ex.Message);
+            }
+        }
+
+        private async Task<List<string>> GetGiphyStickers(string prompt)
+        {
+            var apiKey = _config["Giphy:ApiKey"];
+            if (string.IsNullOrWhiteSpace(apiKey)) return new List<string>();
+
+            using var http = new HttpClient();
+            var url = $"https://api.giphy.com/v1/stickers/search?api_key={apiKey}&q={Uri.EscapeDataString(prompt)}&limit=20&rating=g";
+
+            var response = await http.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+                return new List<string>();
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+
+            var list = new List<string>();
+            if (doc.RootElement.TryGetProperty("data", out var dataElement) && dataElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in dataElement.EnumerateArray())
+                {
+                    if (item.TryGetProperty("images", out var images) &&
+                        images.TryGetProperty("original", out var original) &&
+                        original.TryGetProperty("url", out var urlProp))
+                    {
+                        var urlStr = urlProp.GetString();
+                        if (!string.IsNullOrEmpty(urlStr))
+                        {
+                            list.Add(urlStr);
+                        }
+                    }
+                }
+            }
+
+            return list;
         }
     }
 }

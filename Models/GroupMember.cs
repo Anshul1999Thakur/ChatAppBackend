@@ -1,11 +1,22 @@
-﻿namespace ChatApp.Models
+﻿using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Attributes;
+
+namespace ChatApp.Models
 {
     public class GroupMember
     {
-        public int Id { get; set; }
+        [BsonId]
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string Id { get; set; } = string.Empty;
 
-        public int GroupId { get; set; }
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string GroupId { get; set; } = string.Empty;
 
-        public int UserId { get; set; }
+        [BsonRepresentation(BsonType.ObjectId)]
+        public string UserId { get; set; } = string.Empty;
+
+        public string Role { get; set; } = GroupRole.Member;
+
+        public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
     }
 }
