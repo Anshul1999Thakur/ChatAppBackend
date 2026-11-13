@@ -42,6 +42,13 @@ namespace ChatApp.Controllers
             var updated = await _userService.UpdateProfileImageAsync(userId, file);
             return Ok(ApiResponse<UserProfileDto>.Ok(updated, "Profile image updated successfully"));
         }
+
+        [HttpDelete("image")]
+        public async Task<IActionResult> RemoveProfileImage()
+        {
+            var userId = User.GetUserId();
+            var updated = await _userService.RemoveProfileImageAsync(userId);
+            return Ok(ApiResponse<UserProfileDto>.Ok(updated, "Profile image removed successfully"));
+        }
     }
 }
-

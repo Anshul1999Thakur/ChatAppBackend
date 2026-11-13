@@ -103,6 +103,36 @@ namespace ChatApp.Services
             };
         }
 
+        public async Task<UserProfileDto> RemoveProfileImageAsync(string userId)
+        {
+            var user = await _userRepo.GetByIdAsync(userId);
+            if (user == null)
+                throw new NotFoundException("User not found");
+
+            var oldImage = user.ProfilePictureUrl;
+            user.ProfilePictureUrl = null;
+            user.UpdatedAt = DateTime.UtcNow;
+
+            await _userRepo.UpdateAsync(user);
+
+            if (!string.IsNullOrEmpty(oldImage) && !oldImage.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                _fileService.DeleteFile(oldImage);
+            }
+
+            return new UserProfileDto
+            {
+                Id = user.Id,
+                FullName = user.FullName,
+                Email = user.Email,
+                ProfilePictureUrl = null,
+                Bio = user.Bio,
+                IsOnline = user.IsOnline,
+                LastSeen = user.LastSeen,
+                CreatedAt = user.CreatedAt
+            };
+        }
+
         public async Task<List<UserContactDto>> GetUserDirectoryAsync(string currentUserId)
         {
             var users = await _userRepo.GetAllExceptAsync(currentUserId);
@@ -154,4 +184,3 @@ namespace ChatApp.Services
         }
     }
 }
-

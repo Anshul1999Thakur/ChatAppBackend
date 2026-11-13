@@ -7,7 +7,7 @@ namespace ChatApp.Services
         Task<UserProfileDto> GetProfileAsync(string userId);
         Task<UserProfileDto> UpdateProfileAsync(string userId, UpdateProfileDto dto);
         Task<UserProfileDto> UpdateProfileImageAsync(string userId, IFormFile file);
+        Task<UserProfileDto> RemoveProfileImageAsync(string userId);
         Task<List<UserContactDto>> GetUserDirectoryAsync(string currentUserId);
     }
 }
-
