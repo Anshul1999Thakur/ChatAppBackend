@@ -1,6 +1,7 @@
 using ChatApp.Common;
 using ChatApp.DTOs;
 using ChatApp.Helpers;
+using ChatApp.Hubs;
 using ChatApp.Repositories;
 
 namespace ChatApp.Services
@@ -37,7 +38,7 @@ namespace ChatApp.Services
                 Email = user.Email,
                 ProfilePictureUrl = user.ProfilePictureUrl,
                 Bio = user.Bio,
-                IsOnline = user.IsOnline,
+                IsOnline = ChatHub.IsUserOnline(user.Id),
                 LastSeen = user.LastSeen,
                 CreatedAt = user.CreatedAt
             };
@@ -65,7 +66,7 @@ namespace ChatApp.Services
                 Email = user.Email,
                 ProfilePictureUrl = user.ProfilePictureUrl,
                 Bio = user.Bio,
-                IsOnline = user.IsOnline,
+                IsOnline = ChatHub.IsUserOnline(user.Id),
                 LastSeen = user.LastSeen,
                 CreatedAt = user.CreatedAt
             };
@@ -97,7 +98,7 @@ namespace ChatApp.Services
                 Email = user.Email,
                 ProfilePictureUrl = user.ProfilePictureUrl,
                 Bio = user.Bio,
-                IsOnline = user.IsOnline,
+                IsOnline = ChatHub.IsUserOnline(user.Id),
                 LastSeen = user.LastSeen,
                 CreatedAt = user.CreatedAt
             };
@@ -172,7 +173,7 @@ namespace ChatApp.Services
                     FullName = user.FullName,
                     Email = user.Email,
                     ProfilePictureUrl = user.ProfilePictureUrl,
-                    IsOnline = user.IsOnline,
+                    IsOnline = ChatHub.IsUserOnline(user.Id),
                     LastSeen = user.LastSeen,
                     UnreadCount = unreadCount,
                     LastMessage = decryptedLastMessage,

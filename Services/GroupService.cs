@@ -1,6 +1,7 @@
 using ChatApp.Common;
 using ChatApp.DTOs;
 using ChatApp.Helpers;
+using ChatApp.Hubs;
 using ChatApp.Models;
 using ChatApp.Repositories;
 
@@ -201,7 +202,7 @@ namespace ChatApp.Services
                         Email = u.Email,
                         ProfilePictureUrl = u.ProfilePictureUrl,
                         Role = m.Role,
-                        IsOnline = u.IsOnline,
+                        IsOnline = ChatHub.IsUserOnline(u.Id),
                         JoinedAt = m.JoinedAt
                     });
                 }
@@ -317,7 +318,7 @@ namespace ChatApp.Services
                 Email = u.Email,
                 ProfilePictureUrl = u.ProfilePictureUrl,
                 Role = GroupRole.Member,
-                IsOnline = u.IsOnline,
+                IsOnline = ChatHub.IsUserOnline(u.Id),
                 JoinedAt = DateTime.UtcNow
             }).ToList();
         }
@@ -440,7 +441,7 @@ namespace ChatApp.Services
                 Email = user?.Email ?? string.Empty,
                 ProfilePictureUrl = user?.ProfilePictureUrl,
                 Role = newRole,
-                IsOnline = user?.IsOnline ?? false,
+                IsOnline = user != null && ChatHub.IsUserOnline(user.Id),
                 JoinedAt = targetMembership.JoinedAt
             };
         }

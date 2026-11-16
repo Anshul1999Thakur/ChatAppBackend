@@ -1,4 +1,4 @@
-﻿using ChatApp.Common;
+using ChatApp.Common;
 using ChatApp.Data;
 using ChatApp.Helpers;
 using ChatApp.Hubs;
@@ -173,6 +173,10 @@ try
 {
     var mongoDb = app.Services.GetRequiredService<MongoDbContext>();
     await mongoDb.InitializeIndexesAsync();
+
+    // Reset stale online statuses from previous sessions/crashes
+    var resetOnlineUpdate = MongoDB.Driver.Builders<ChatApp.Models.User>.Update.Set(u => u.IsOnline, false);
+    await mongoDb.Users.UpdateManyAsync(MongoDB.Driver.Builders<ChatApp.Models.User>.Filter.Empty, resetOnlineUpdate);
 }
 catch (Exception ex)
 {
