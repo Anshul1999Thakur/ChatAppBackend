@@ -18,6 +18,16 @@ namespace ChatApp.Repositories
             await _context.GroupMessages.InsertOneAsync(message);
         }
 
+        public async Task<GroupMessage?> GetByIdAsync(string id)
+        {
+            return await _context.GroupMessages.Find(m => m.Id == id).FirstOrDefaultAsync();
+        }
+
+        public async Task UpdateAsync(GroupMessage message)
+        {
+            await _context.GroupMessages.ReplaceOneAsync(m => m.Id == message.Id, message);
+        }
+
         public async Task<List<GroupMessage>> GetGroupHistoryAsync(string groupId, int page, int pageSize)
         {
             var list = await _context.GroupMessages
@@ -45,4 +55,3 @@ namespace ChatApp.Repositories
         }
     }
 }
-

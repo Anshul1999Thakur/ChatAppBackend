@@ -1,10 +1,12 @@
 using ChatApp.Common;
 using ChatApp.Data;
 using ChatApp.DTOs;
+using ChatApp.Hubs;
 using ChatApp.Models;
 using ChatApp.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using MongoDB.Driver;
 using System.Text.Json;
 
@@ -18,15 +20,18 @@ namespace ChatApp.Controllers
         private readonly IMessageService _messageService;
         private readonly MongoDbContext _db;
         private readonly IConfiguration _config;
+        private readonly IHubContext<ChatHub> _hubContext;
 
         public ChatController(
             IMessageService messageService,
             MongoDbContext db,
-            IConfiguration config)
+            IConfiguration config,
+            IHubContext<ChatHub> hubContext)
         {
             _messageService = messageService;
             _db = db;
             _config = config;
+            _hubContext = hubContext;
         }
 
         // =====================================
@@ -52,6 +57,32 @@ namespace ChatApp.Controllers
 
             // Security: Never trust client-provided senderId if it differs from authenticated user
             var result = await _messageService.SendMessageAsync(authenticatedId, effectiveReceiverId, effectiveText);
+            return Ok(result);
+        }
+
+        // =====================================
+        // EDIT / UPDATE MESSAGE (WhatsApp-style)
+        // =====================================
+        [HttpPut("messages/{messageId}")]
+        public async Task<IActionResult> EditMessage(
+            string messageId,
+            [FromBody] EditMessageRequestDto dto)
+        {
+            var authenticatedId = User.GetUserId();
+            var result = await _messageService.EditMessageAsync(messageId, authenticatedId, dto.NewText);
+
+            // Real-time broadcast to both receiver and sender
+            var receiverConns = ChatHub.GetUserConnections(result.ReceiverId);
+            if (receiverConns.Count > 0)
+            {
+                await _hubContext.Clients.Clients(receiverConns).SendAsync("MessageUpdated", result);
+                await _hubContext.Clients.Clients(receiverConns).SendAsync("MessageEdited", result);
+            }
+
+            var senderConns = ChatHub.GetUserConnections(result.SenderId);
+            await _hubContext.Clients.Clients(senderConns).SendAsync("MessageUpdated", result);
+            await _hubContext.Clients.Clients(senderConns).SendAsync("MessageEdited", result);
+
             return Ok(result);
         }
 

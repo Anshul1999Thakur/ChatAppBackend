@@ -1,4 +1,4 @@
-﻿using MongoDB.Bson;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace ChatApp.Models
@@ -25,5 +25,9 @@ namespace ChatApp.Models
         public bool IsSystemMessage { get; set; } = false;
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        public bool IsEdited { get; set; } = false;
+
+        public DateTime? EditedAt { get; set; }
     }
 }

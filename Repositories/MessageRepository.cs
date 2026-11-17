@@ -23,6 +23,11 @@ namespace ChatApp.Repositories
             return await _context.Messages.Find(m => m.Id == id).FirstOrDefaultAsync();
         }
 
+        public async Task UpdateAsync(Message message)
+        {
+            await _context.Messages.ReplaceOneAsync(m => m.Id == message.Id, message);
+        }
+
         public async Task<List<Message>> GetConversationHistoryAsync(string user1, string user2, int page, int pageSize)
         {
             var filter = Builders<Message>.Filter.Or(
@@ -101,4 +106,3 @@ namespace ChatApp.Repositories
         }
     }
 }
-

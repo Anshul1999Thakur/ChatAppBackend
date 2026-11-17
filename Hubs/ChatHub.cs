@@ -127,6 +127,25 @@ namespace ChatApp.Hubs
             await Clients.Clients(senderConnections).SendAsync("MessageReceived", msg);
         }
 
+        public async Task EditMessage(string messageId, string newText)
+        {
+            var senderId = Context.User.GetUserId();
+            if (string.IsNullOrEmpty(senderId)) return;
+
+            var updatedMsg = await _messageService.EditMessageAsync(messageId, senderId, newText);
+
+            var receiverConnections = GetUserConnections(updatedMsg.ReceiverId);
+            if (receiverConnections.Count > 0)
+            {
+                await Clients.Clients(receiverConnections).SendAsync("MessageUpdated", updatedMsg);
+                await Clients.Clients(receiverConnections).SendAsync("MessageEdited", updatedMsg);
+            }
+
+            var senderConnections = GetUserConnections(senderId);
+            await Clients.Clients(senderConnections).SendAsync("MessageUpdated", updatedMsg);
+            await Clients.Clients(senderConnections).SendAsync("MessageEdited", updatedMsg);
+        }
+
         public async Task MarkSeen(string senderId)
         {
             var currentUserId = Context.User.GetUserId();
@@ -199,6 +218,15 @@ namespace ChatApp.Hubs
 
             await Clients.Group($"group_{groupId}").SendAsync("ReceiveGroupMessage", msg);
             await Clients.Group($"group_{groupId}").SendAsync("GroupMessageReceived", msg);
+        }
+
+        public async Task EditGroupMessage(string groupId, string messageId, string newText)
+        {
+            var senderId = Context.User.GetUserId();
+            var msg = await _groupMessageService.EditGroupMessageAsync(groupId, messageId, senderId, newText);
+
+            await Clients.Group($"group_{groupId}").SendAsync("GroupMessageUpdated", msg);
+            await Clients.Group($"group_{groupId}").SendAsync("GroupMessageEdited", msg);
         }
 
         public async Task GroupTyping(string groupId, bool isTyping)

@@ -41,7 +41,9 @@ namespace ChatApp.Services
                 EncryptedText = _crypto.Encrypt(text.Trim()),
                 CreatedAt = DateTime.UtcNow,
                 IsSeen = false,
-                IsDelivered = false
+                IsDelivered = false,
+                IsEdited = false,
+                EditedAt = null
             };
 
             await _messageRepo.CreateAsync(message);
@@ -56,7 +58,9 @@ namespace ChatApp.Services
                 IsSticker = false,
                 CreatedAt = message.CreatedAt,
                 IsSeen = message.IsSeen,
-                IsDelivered = message.IsDelivered
+                IsDelivered = message.IsDelivered,
+                IsEdited = false,
+                EditedAt = null
             };
         }
 
@@ -81,7 +85,9 @@ namespace ChatApp.Services
                 EncryptedText = _crypto.Encrypt("Sticker"),
                 CreatedAt = DateTime.UtcNow,
                 IsSeen = false,
-                IsDelivered = false
+                IsDelivered = false,
+                IsEdited = false,
+                EditedAt = null
             };
 
             await _messageRepo.CreateAsync(message);
@@ -96,7 +102,57 @@ namespace ChatApp.Services
                 IsSticker = true,
                 CreatedAt = message.CreatedAt,
                 IsSeen = message.IsSeen,
-                IsDelivered = message.IsDelivered
+                IsDelivered = message.IsDelivered,
+                IsEdited = false,
+                EditedAt = null
+            };
+        }
+
+        public async Task<MessageResponseDto> EditMessageAsync(string messageId, string currentUserId, string newText)
+        {
+            if (string.IsNullOrWhiteSpace(newText))
+                throw new BadRequestException("Message text cannot be empty or whitespace");
+
+            var trimmedText = newText.Trim();
+            if (trimmedText.Length > 2000)
+                throw new BadRequestException("Message text cannot exceed 2000 characters");
+
+            var message = await _messageRepo.GetByIdAsync(messageId);
+            if (message == null)
+                throw new NotFoundException("Message not found");
+
+            // WhatsApp Rule 1: Only sender can edit message
+            if (message.SenderId != currentUserId)
+                throw new ForbiddenException("You can only edit messages sent by you");
+
+            // WhatsApp Rule 2: Cannot edit stickers
+            if (message.IsSticker)
+                throw new BadRequestException("Stickers cannot be edited");
+
+            // WhatsApp Rule 3: 15-minute time window
+            if (DateTime.UtcNow - message.CreatedAt > TimeSpan.FromMinutes(15))
+                throw new BadRequestException("Messages can only be edited within 15 minutes of sending");
+
+            // Update content
+            message.EncryptedText = _crypto.Encrypt(trimmedText);
+            message.IsEdited = true;
+            message.EditedAt = DateTime.UtcNow;
+
+            await _messageRepo.UpdateAsync(message);
+
+            return new MessageResponseDto
+            {
+                Id = message.Id,
+                SenderId = message.SenderId,
+                ReceiverId = message.ReceiverId,
+                Text = trimmedText,
+                StickerUrl = message.StickerUrl,
+                IsSticker = message.IsSticker,
+                CreatedAt = message.CreatedAt,
+                IsSeen = message.IsSeen,
+                IsDelivered = message.IsDelivered,
+                IsEdited = message.IsEdited,
+                EditedAt = message.EditedAt
             };
         }
 
@@ -131,7 +187,9 @@ namespace ChatApp.Services
                     IsSticker = msg.IsSticker,
                     CreatedAt = msg.CreatedAt,
                     IsSeen = msg.IsSeen,
-                    IsDelivered = msg.IsDelivered
+                    IsDelivered = msg.IsDelivered,
+                    IsEdited = msg.IsEdited,
+                    EditedAt = msg.EditedAt
                 });
             }
 
@@ -144,4 +202,3 @@ namespace ChatApp.Services
         }
     }
 }
-

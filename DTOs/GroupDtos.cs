@@ -54,6 +54,13 @@ namespace ChatApp.DTOs
         public string Text { get; set; } = string.Empty;
     }
 
+    public class EditGroupMessageDto
+    {
+        [Required(ErrorMessage = "New message text is required")]
+        [StringLength(2000, MinimumLength = 1, ErrorMessage = "Message must be between 1 and 2000 characters")]
+        public string NewText { get; set; } = string.Empty;
+    }
+
     public class SendGroupStickerDto
     {
         [Required(ErrorMessage = "Sticker URL is required")]
@@ -109,6 +116,7 @@ namespace ChatApp.DTOs
         public bool IsSticker { get; set; }
         public bool IsSystemMessage { get; set; }
         public DateTime CreatedAt { get; set; }
+        public bool IsEdited { get; set; }
+        public DateTime? EditedAt { get; set; }
     }
 }
-

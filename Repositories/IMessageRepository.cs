@@ -6,6 +6,7 @@ namespace ChatApp.Repositories
     {
         Task CreateAsync(Message message);
         Task<Message?> GetByIdAsync(string id);
+        Task UpdateAsync(Message message);
         Task<List<Message>> GetConversationHistoryAsync(string user1, string user2, int page, int pageSize);
         Task<Message?> GetLastMessageBetweenUsersAsync(string user1, string user2);
         Task<long> GetUnreadCountAsync(string senderId, string receiverId);
@@ -14,4 +15,3 @@ namespace ChatApp.Repositories
         Task<List<Message>> GetPendingDeliveredMessagesAsync(string receiverId);
     }
 }
-

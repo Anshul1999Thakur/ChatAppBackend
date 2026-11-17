@@ -255,6 +255,25 @@ namespace ChatApp.Controllers
 
             return Ok(message);
         }
+
+        // ==========================================
+        // EDIT / UPDATE GROUP MESSAGE (WhatsApp-style)
+        // ==========================================
+        [HttpPut("{groupId}/messages/{messageId}")]
+        public async Task<IActionResult> EditGroupMessage(
+            string groupId,
+            string messageId,
+            [FromBody] EditGroupMessageDto dto)
+        {
+            var currentUserId = User.GetUserId();
+            var updated = await _groupMessageService.EditGroupMessageAsync(groupId, messageId, currentUserId, dto.NewText);
+
+            // Broadcast to real-time group
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMessageUpdated", updated);
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMessageEdited", updated);
+
+            return Ok(updated);
+        }
     }
 }
 

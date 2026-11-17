@@ -12,6 +12,13 @@ namespace ChatApp.DTOs
         public string Text { get; set; } = string.Empty;
     }
 
+    public class EditMessageRequestDto
+    {
+        [Required(ErrorMessage = "New message text is required")]
+        [StringLength(2000, MinimumLength = 1, ErrorMessage = "Message must be between 1 and 2000 characters")]
+        public string NewText { get; set; } = string.Empty;
+    }
+
     public class SendStickerRequestDto
     {
         [Required(ErrorMessage = "Receiver ID is required")]
@@ -32,6 +39,8 @@ namespace ChatApp.DTOs
         public DateTime CreatedAt { get; set; }
         public bool IsSeen { get; set; }
         public bool IsDelivered { get; set; }
+        public bool IsEdited { get; set; }
+        public DateTime? EditedAt { get; set; }
     }
 
     public class UserContactDto
@@ -47,4 +56,3 @@ namespace ChatApp.DTOs
         public DateTime? LastMessageTime { get; set; }
     }
 }
-

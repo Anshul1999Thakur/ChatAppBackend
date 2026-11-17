@@ -1,4 +1,4 @@
-﻿using MongoDB.Bson;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace ChatApp.Models
@@ -26,5 +26,9 @@ namespace ChatApp.Models
         public bool IsSeen { get; set; }
 
         public bool IsDelivered { get; set; }
+
+        public bool IsEdited { get; set; } = false;
+
+        public DateTime? EditedAt { get; set; }
     }
 }
