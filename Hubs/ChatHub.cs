@@ -43,6 +43,20 @@ namespace ChatApp.Hubs
             if (!string.IsNullOrEmpty(userId))
             {
                 await TrackUserConnectionAsync(userId, Context.ConnectionId);
+
+                // Auto-join all group channels for real-time group broadcasts
+                try
+                {
+                    var memberships = await _groupMemberRepo.GetMembershipsByUserIdAsync(userId);
+                    foreach (var m in memberships)
+                    {
+                        await Groups.AddToGroupAsync(Context.ConnectionId, $"group_{m.GroupId}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to auto-join user groups on connect for {UserId}", userId);
+                }
             }
 
             await base.OnConnectedAsync();
@@ -78,6 +92,20 @@ namespace ChatApp.Hubs
             if (!string.IsNullOrEmpty(authenticatedUserId))
             {
                 await TrackUserConnectionAsync(authenticatedUserId, Context.ConnectionId);
+
+                // Auto-join all group channels for real-time group broadcasts
+                try
+                {
+                    var memberships = await _groupMemberRepo.GetMembershipsByUserIdAsync(authenticatedUserId);
+                    foreach (var m in memberships)
+                    {
+                        await Groups.AddToGroupAsync(Context.ConnectionId, $"group_{m.GroupId}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to auto-join user groups in RegisterUser for {UserId}", authenticatedUserId);
+                }
             }
         }
 

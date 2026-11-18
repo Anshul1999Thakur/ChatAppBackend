@@ -86,6 +86,19 @@ namespace ChatApp.Controllers
             // Broadcast real-time update to group
             await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupUpdated", updated);
 
+            var updateSysMsg = new GroupMessageDto
+            {
+                Id = Guid.NewGuid().ToString(),
+                GroupId = groupId,
+                SenderId = currentUserId,
+                SenderName = "System",
+                Text = "Group information was updated",
+                IsSystemMessage = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("ReceiveGroupMessage", updateSysMsg);
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMessageReceived", updateSysMsg);
+
             return Ok(updated);
         }
 
@@ -119,14 +132,32 @@ namespace ChatApp.Controllers
                 await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMemberAdded", new { groupId, member });
                 await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMemberUpdated", new { groupId, member, action = "Added" });
 
-                // Also notify the newly added user directly
+                // Also notify the newly added user directly and add active connections to group room
                 var conns = ChatHub.GetUserConnections(member.UserId);
+                foreach (var connId in conns)
+                {
+                    await _hubContext.Groups.AddToGroupAsync(connId, $"group_{groupId}");
+                }
                 if (conns.Count > 0)
                 {
                     var groupDetails = await _groupService.GetGroupDetailsAsync(groupId, currentUserId);
                     await _hubContext.Clients.Clients(conns).SendAsync("GroupCreated", groupDetails);
                 }
             }
+
+            var addedNames = string.Join(", ", addedMembers.Select(m => m.FullName));
+            var addSysMsg = new GroupMessageDto
+            {
+                Id = Guid.NewGuid().ToString(),
+                GroupId = groupId,
+                SenderId = currentUserId,
+                SenderName = "System",
+                Text = $"{addedNames} joined the group",
+                IsSystemMessage = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("ReceiveGroupMessage", addSysMsg);
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMessageReceived", addSysMsg);
 
             return Ok(addedMembers);
         }
@@ -144,12 +175,29 @@ namespace ChatApp.Controllers
             await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMemberRemoved", new { groupId, userId });
             await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMemberUpdated", new { groupId, userId, action = "Removed" });
 
-            // Notify removed user
+            // Remove connections from group room
             var conns = ChatHub.GetUserConnections(userId);
+            foreach (var connId in conns)
+            {
+                await _hubContext.Groups.RemoveFromGroupAsync(connId, $"group_{groupId}");
+            }
             if (conns.Count > 0)
             {
                 await _hubContext.Clients.Clients(conns).SendAsync("GroupDeleted", groupId);
             }
+
+            var removeSysMsg = new GroupMessageDto
+            {
+                Id = Guid.NewGuid().ToString(),
+                GroupId = groupId,
+                SenderId = currentUserId,
+                SenderName = "System",
+                Text = "A member was removed from the group",
+                IsSystemMessage = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("ReceiveGroupMessage", removeSysMsg);
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMessageReceived", removeSysMsg);
 
             return Ok(ApiResponse.Ok("Member removed successfully"));
         }
@@ -167,6 +215,26 @@ namespace ChatApp.Controllers
             await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMemberLeft", new { groupId, userId = currentUserId });
             await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMemberUpdated", new { groupId, userId = currentUserId, action = "Left" });
 
+            // Remove connections from group room
+            var conns = ChatHub.GetUserConnections(currentUserId);
+            foreach (var connId in conns)
+            {
+                await _hubContext.Groups.RemoveFromGroupAsync(connId, $"group_{groupId}");
+            }
+
+            var leaveSysMsg = new GroupMessageDto
+            {
+                Id = Guid.NewGuid().ToString(),
+                GroupId = groupId,
+                SenderId = currentUserId,
+                SenderName = "System",
+                Text = "A member left the group",
+                IsSystemMessage = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("ReceiveGroupMessage", leaveSysMsg);
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMessageReceived", leaveSysMsg);
+
             return Ok(ApiResponse.Ok("You left the group successfully"));
         }
 
@@ -182,6 +250,19 @@ namespace ChatApp.Controllers
             // Broadcast to group
             await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupRoleUpdated", new { groupId, userId, newRole = dto.Role });
             await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMemberUpdated", new { groupId, member = updated, action = "RoleChanged" });
+
+            var roleSysMsg = new GroupMessageDto
+            {
+                Id = Guid.NewGuid().ToString(),
+                GroupId = groupId,
+                SenderId = currentUserId,
+                SenderName = "System",
+                Text = $"{updated.FullName}'s role was updated to {dto.Role}",
+                IsSystemMessage = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("ReceiveGroupMessage", roleSysMsg);
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMessageReceived", roleSysMsg);
 
             return Ok(updated);
         }
@@ -203,6 +284,19 @@ namespace ChatApp.Controllers
                 newOwnerId = dto.NewOwnerId
             });
             await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMemberUpdated", new { groupId, newOwnerId = dto.NewOwnerId, action = "OwnershipTransferred" });
+
+            var transferSysMsg = new GroupMessageDto
+            {
+                Id = Guid.NewGuid().ToString(),
+                GroupId = groupId,
+                SenderId = currentUserId,
+                SenderName = "System",
+                Text = "Group ownership was transferred",
+                IsSystemMessage = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("ReceiveGroupMessage", transferSysMsg);
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupMessageReceived", transferSysMsg);
 
             return Ok(ApiResponse.Ok("Ownership transferred successfully"));
         }
