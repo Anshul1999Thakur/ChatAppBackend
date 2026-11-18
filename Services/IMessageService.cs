@@ -9,5 +9,8 @@ namespace ChatApp.Services
         Task<MessageResponseDto> EditMessageAsync(string messageId, string currentUserId, string newText);
         Task<List<MessageResponseDto>> GetConversationHistoryAsync(string currentUserId, string otherUserId, int page, int pageSize);
         Task MarkSeenAsync(string currentUserId, string senderId);
+        Task ClearChatAsync(string currentUserId, string otherUserId, bool clearForEveryone);
+        Task<ConversationSettingDto> GetChatSettingsAsync(string currentUserId, string otherUserId);
+        Task<ConversationSettingDto> SetDisappearingMessagesAsync(string currentUserId, string otherUserId, int hours);
     }
 }

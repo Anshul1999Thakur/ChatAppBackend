@@ -9,15 +9,18 @@ namespace ChatApp.Services
     public class MessageService : IMessageService
     {
         private readonly IMessageRepository _messageRepo;
+        private readonly IConversationSettingRepository _settingRepo;
         private readonly IUserRepository _userRepo;
         private readonly EncryptionHelper _crypto;
 
         public MessageService(
             IMessageRepository messageRepo,
+            IConversationSettingRepository settingRepo,
             IUserRepository userRepo,
             EncryptionHelper crypto)
         {
             _messageRepo = messageRepo;
+            _settingRepo = settingRepo;
             _userRepo = userRepo;
             _crypto = crypto;
         }
@@ -34,6 +37,14 @@ namespace ChatApp.Services
             if (receiver == null)
                 throw new NotFoundException("Receiver does not exist");
 
+            // Check disappearing message settings
+            var setting = await _settingRepo.GetSettingAsync(senderId, receiverId);
+            DateTime? expiresAt = null;
+            if (setting != null && setting.AutoDeleteDurationHours > 0)
+            {
+                expiresAt = DateTime.UtcNow.AddHours(setting.AutoDeleteDurationHours);
+            }
+
             var message = new Message
             {
                 SenderId = senderId,
@@ -43,7 +54,9 @@ namespace ChatApp.Services
                 IsSeen = false,
                 IsDelivered = false,
                 IsEdited = false,
-                EditedAt = null
+                EditedAt = null,
+                ExpiresAt = expiresAt,
+                IsSystemMessage = false
             };
 
             await _messageRepo.CreateAsync(message);
@@ -56,11 +69,13 @@ namespace ChatApp.Services
                 Text = text.Trim(),
                 StickerUrl = null,
                 IsSticker = false,
+                IsSystemMessage = false,
                 CreatedAt = message.CreatedAt,
                 IsSeen = message.IsSeen,
                 IsDelivered = message.IsDelivered,
                 IsEdited = false,
-                EditedAt = null
+                EditedAt = null,
+                ExpiresAt = message.ExpiresAt
             };
         }
 
@@ -76,6 +91,13 @@ namespace ChatApp.Services
             if (receiver == null)
                 throw new NotFoundException("Receiver does not exist");
 
+            var setting = await _settingRepo.GetSettingAsync(senderId, receiverId);
+            DateTime? expiresAt = null;
+            if (setting != null && setting.AutoDeleteDurationHours > 0)
+            {
+                expiresAt = DateTime.UtcNow.AddHours(setting.AutoDeleteDurationHours);
+            }
+
             var message = new Message
             {
                 SenderId = senderId,
@@ -87,7 +109,9 @@ namespace ChatApp.Services
                 IsSeen = false,
                 IsDelivered = false,
                 IsEdited = false,
-                EditedAt = null
+                EditedAt = null,
+                ExpiresAt = expiresAt,
+                IsSystemMessage = false
             };
 
             await _messageRepo.CreateAsync(message);
@@ -100,11 +124,13 @@ namespace ChatApp.Services
                 Text = "Sticker",
                 StickerUrl = message.StickerUrl,
                 IsSticker = true,
+                IsSystemMessage = false,
                 CreatedAt = message.CreatedAt,
                 IsSeen = message.IsSeen,
                 IsDelivered = message.IsDelivered,
                 IsEdited = false,
-                EditedAt = null
+                EditedAt = null,
+                ExpiresAt = message.ExpiresAt
             };
         }
 
@@ -125,9 +151,9 @@ namespace ChatApp.Services
             if (message.SenderId != currentUserId)
                 throw new ForbiddenException("You can only edit messages sent by you");
 
-            // WhatsApp Rule 2: Cannot edit stickers
-            if (message.IsSticker)
-                throw new BadRequestException("Stickers cannot be edited");
+            // WhatsApp Rule 2: Cannot edit stickers or system messages
+            if (message.IsSticker || message.IsSystemMessage)
+                throw new BadRequestException("Stickers and system notices cannot be edited");
 
             // WhatsApp Rule 3: 15-minute time window
             if (DateTime.UtcNow - message.CreatedAt > TimeSpan.FromMinutes(15))
@@ -148,11 +174,13 @@ namespace ChatApp.Services
                 Text = trimmedText,
                 StickerUrl = message.StickerUrl,
                 IsSticker = message.IsSticker,
+                IsSystemMessage = message.IsSystemMessage,
                 CreatedAt = message.CreatedAt,
                 IsSeen = message.IsSeen,
                 IsDelivered = message.IsDelivered,
                 IsEdited = message.IsEdited,
-                EditedAt = message.EditedAt
+                EditedAt = message.EditedAt,
+                ExpiresAt = message.ExpiresAt
             };
         }
 
@@ -162,7 +190,15 @@ namespace ChatApp.Services
             if (pageSize < 1) pageSize = 30;
             if (pageSize > 100) pageSize = 100;
 
-            var messages = await _messageRepo.GetConversationHistoryAsync(currentUserId, otherUserId, page, pageSize);
+            // Fetch clearedAt timestamp for current user if available
+            var setting = await _settingRepo.GetSettingAsync(currentUserId, otherUserId);
+            DateTime? clearedAfter = null;
+            if (setting != null && setting.ClearedAt.TryGetValue(currentUserId, out var dt))
+            {
+                clearedAfter = dt;
+            }
+
+            var messages = await _messageRepo.GetConversationHistoryAsync(currentUserId, otherUserId, page, pageSize, clearedAfter);
 
             var result = new List<MessageResponseDto>(messages.Count);
             foreach (var msg in messages)
@@ -185,11 +221,13 @@ namespace ChatApp.Services
                     Text = text,
                     StickerUrl = msg.StickerUrl,
                     IsSticker = msg.IsSticker,
+                    IsSystemMessage = msg.IsSystemMessage,
                     CreatedAt = msg.CreatedAt,
                     IsSeen = msg.IsSeen,
                     IsDelivered = msg.IsDelivered,
                     IsEdited = msg.IsEdited,
-                    EditedAt = msg.EditedAt
+                    EditedAt = msg.EditedAt,
+                    ExpiresAt = msg.ExpiresAt
                 });
             }
 
@@ -199,6 +237,75 @@ namespace ChatApp.Services
         public async Task MarkSeenAsync(string currentUserId, string senderId)
         {
             await _messageRepo.MarkMessagesAsSeenAsync(senderId, currentUserId);
+        }
+
+        public async Task ClearChatAsync(string currentUserId, string otherUserId, bool clearForEveryone)
+        {
+            if (clearForEveryone)
+            {
+                // Delete messages completely from database
+                await _messageRepo.ClearMessagesAsync(currentUserId, otherUserId);
+            }
+            else
+            {
+                // Set ClearedAt timestamp for current user (hides messages prior to this moment for caller)
+                await _settingRepo.SetUserClearedAtAsync(currentUserId, otherUserId, currentUserId, DateTime.UtcNow);
+            }
+        }
+
+        public async Task<ConversationSettingDto> GetChatSettingsAsync(string currentUserId, string otherUserId)
+        {
+            var setting = await _settingRepo.GetSettingAsync(currentUserId, otherUserId);
+            return new ConversationSettingDto
+            {
+                AutoDeleteDurationHours = setting?.AutoDeleteDurationHours ?? 0,
+                AutoDeleteSetBy = setting?.AutoDeleteSetBy,
+                AutoDeleteSetAt = setting?.AutoDeleteSetAt
+            };
+        }
+
+        public async Task<ConversationSettingDto> SetDisappearingMessagesAsync(string currentUserId, string otherUserId, int hours)
+        {
+            if (hours < 0)
+                throw new BadRequestException("Duration hours cannot be negative");
+
+            await _settingRepo.UpdateAutoDeleteDurationAsync(currentUserId, otherUserId, hours, currentUserId);
+
+            // Create WhatsApp-style in-chat system message announcing the change
+            string durationText = hours switch
+            {
+                0 => "off",
+                24 => "24 hours",
+                168 => "7 days",
+                2160 => "90 days",
+                _ => $"{hours} hours"
+            };
+
+            var caller = await _userRepo.GetByIdAsync(currentUserId);
+            var callerName = caller?.FullName ?? "User";
+
+            string notice = hours == 0
+                ? $"{callerName} turned off disappearing messages."
+                : $"{callerName} set messages to disappear after {durationText}.";
+
+            var systemMsg = new Message
+            {
+                SenderId = currentUserId,
+                ReceiverId = otherUserId,
+                EncryptedText = _crypto.Encrypt(notice),
+                IsSystemMessage = true,
+                CreatedAt = DateTime.UtcNow,
+                IsSeen = false,
+                IsDelivered = false
+            };
+            await _messageRepo.CreateAsync(systemMsg);
+
+            return new ConversationSettingDto
+            {
+                AutoDeleteDurationHours = hours,
+                AutoDeleteSetBy = currentUserId,
+                AutoDeleteSetAt = DateTime.UtcNow
+            };
         }
     }
 }

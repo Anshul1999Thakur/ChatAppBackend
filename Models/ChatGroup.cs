@@ -1,4 +1,4 @@
-﻿using MongoDB.Bson;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace ChatApp.Models
@@ -24,5 +24,11 @@ namespace ChatApp.Models
         public bool IsDeleted { get; set; } = false;
 
         public DateTime? DeletedAt { get; set; }
+
+        public int AutoDeleteDurationHours { get; set; } = 0; // 0 = off, 24 = 24h, 168 = 7d, 2160 = 90d
+
+        public string? AutoDeleteSetBy { get; set; }
+
+        public DateTime? AutoDeleteSetAt { get; set; }
     }
 }

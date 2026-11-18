@@ -1,4 +1,4 @@
-﻿using MongoDB.Bson;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace ChatApp.Models
@@ -18,5 +18,7 @@ namespace ChatApp.Models
         public string Role { get; set; } = GroupRole.Member;
 
         public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
+
+        public DateTime? ClearedAt { get; set; }
     }
 }

@@ -51,7 +51,10 @@ namespace ChatApp.Services
                 ImageUrl = dto.ImageUrl,
                 CreatedBy = creatorId,
                 CreatedAt = DateTime.UtcNow,
-                IsDeleted = false
+                IsDeleted = false,
+                AutoDeleteDurationHours = dto.AutoDeleteDurationHours > 0 ? dto.AutoDeleteDurationHours : 0,
+                AutoDeleteSetBy = dto.AutoDeleteDurationHours > 0 ? creatorId : null,
+                AutoDeleteSetAt = dto.AutoDeleteDurationHours > 0 ? DateTime.UtcNow : null
             };
 
             await _groupRepo.CreateAsync(group);
@@ -113,7 +116,8 @@ namespace ChatApp.Services
                 MemberCount = membersToAdd.Count,
                 LastMessage = $"Group \"{group.Name}\" was created",
                 LastMessageTime = initialMessage.CreatedAt,
-                UnreadCount = 0
+                UnreadCount = 0,
+                AutoDeleteDurationHours = group.AutoDeleteDurationHours
             };
         }
 
@@ -130,7 +134,7 @@ namespace ChatApp.Services
             {
                 var userMembership = memberships.First(m => m.GroupId == group.Id);
                 var memberCount = await _memberRepo.CountMembersAsync(group.Id);
-                var lastMsg = await _messageRepo.GetLastMessageByGroupIdAsync(group.Id);
+                var lastMsg = await _messageRepo.GetLastMessageByGroupIdAsync(group.Id, userMembership.ClearedAt);
 
                 string? lastMessageText = null;
                 DateTime? lastMessageTime = null;
@@ -168,7 +172,8 @@ namespace ChatApp.Services
                     MemberCount = memberCount,
                     LastMessage = lastMessageText,
                     LastMessageTime = lastMessageTime,
-                    UnreadCount = 0
+                    UnreadCount = 0,
+                    AutoDeleteDurationHours = group.AutoDeleteDurationHours
                 });
             }
 
@@ -217,6 +222,9 @@ namespace ChatApp.Services
                 CreatedBy = group.CreatedBy,
                 CreatedAt = group.CreatedAt,
                 CurrentUserRole = membership.Role,
+                AutoDeleteDurationHours = group.AutoDeleteDurationHours,
+                AutoDeleteSetBy = group.AutoDeleteSetBy,
+                AutoDeleteSetAt = group.AutoDeleteSetAt,
                 Members = memberDtos.OrderBy(m => m.Role == GroupRole.Owner ? 0 : m.Role == GroupRole.Admin ? 1 : 2).ThenBy(m => m.FullName).ToList()
             };
         }

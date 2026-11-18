@@ -10,17 +10,20 @@ namespace ChatApp.Services
     {
         private readonly IUserRepository _userRepo;
         private readonly IMessageRepository _messageRepo;
+        private readonly IConversationSettingRepository _settingRepo;
         private readonly IFileStorageService _fileService;
         private readonly EncryptionHelper _crypto;
 
         public UserService(
             IUserRepository userRepo,
             IMessageRepository messageRepo,
+            IConversationSettingRepository settingRepo,
             IFileStorageService fileService,
             EncryptionHelper crypto)
         {
             _userRepo = userRepo;
             _messageRepo = messageRepo;
+            _settingRepo = settingRepo;
             _fileService = fileService;
             _crypto = crypto;
         }
@@ -141,8 +144,15 @@ namespace ChatApp.Services
 
             foreach (var user in users)
             {
-                var unreadCount = await _messageRepo.GetUnreadCountAsync(user.Id, currentUserId);
-                var lastMsg = await _messageRepo.GetLastMessageBetweenUsersAsync(user.Id, currentUserId);
+                var setting = await _settingRepo.GetSettingAsync(currentUserId, user.Id);
+                DateTime? clearedAfter = null;
+                if (setting != null && setting.ClearedAt.TryGetValue(currentUserId, out var dt))
+                {
+                    clearedAfter = dt;
+                }
+
+                var unreadCount = await _messageRepo.GetUnreadCountAsync(user.Id, currentUserId, clearedAfter);
+                var lastMsg = await _messageRepo.GetLastMessageBetweenUsersAsync(user.Id, currentUserId, clearedAfter);
 
                 string decryptedLastMessage = string.Empty;
                 DateTime? lastMessageTime = null;
@@ -177,7 +187,8 @@ namespace ChatApp.Services
                     LastSeen = user.LastSeen,
                     UnreadCount = unreadCount,
                     LastMessage = decryptedLastMessage,
-                    LastMessageTime = lastMessageTime
+                    LastMessageTime = lastMessageTime,
+                    AutoDeleteDurationHours = setting?.AutoDeleteDurationHours ?? 0
                 });
             }
 

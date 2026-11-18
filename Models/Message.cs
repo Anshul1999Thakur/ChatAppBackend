@@ -21,6 +21,8 @@ namespace ChatApp.Models
 
         public bool IsSticker { get; set; } = false;
 
+        public bool IsSystemMessage { get; set; } = false;
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         public bool IsSeen { get; set; }
@@ -30,5 +32,7 @@ namespace ChatApp.Models
         public bool IsEdited { get; set; } = false;
 
         public DateTime? EditedAt { get; set; }
+
+        public DateTime? ExpiresAt { get; set; }
     }
 }

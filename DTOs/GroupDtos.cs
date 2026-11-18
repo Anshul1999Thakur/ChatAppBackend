@@ -14,6 +14,8 @@ namespace ChatApp.DTOs
         public string? ImageUrl { get; set; }
 
         public List<string> MemberIds { get; set; } = new List<string>();
+
+        public int AutoDeleteDurationHours { get; set; } = 0;
     }
 
     public class UpdateGroupDto
@@ -80,6 +82,7 @@ namespace ChatApp.DTOs
         public string? LastMessage { get; set; }
         public DateTime? LastMessageTime { get; set; }
         public int UnreadCount { get; set; }
+        public int AutoDeleteDurationHours { get; set; }
     }
 
     public class GroupDetailDto
@@ -91,6 +94,9 @@ namespace ChatApp.DTOs
         public string CreatedBy { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
         public string CurrentUserRole { get; set; } = string.Empty;
+        public int AutoDeleteDurationHours { get; set; }
+        public string? AutoDeleteSetBy { get; set; }
+        public DateTime? AutoDeleteSetAt { get; set; }
         public List<GroupMemberDetailDto> Members { get; set; } = new List<GroupMemberDetailDto>();
     }
 
@@ -118,5 +124,6 @@ namespace ChatApp.DTOs
         public DateTime CreatedAt { get; set; }
         public bool IsEdited { get; set; }
         public DateTime? EditedAt { get; set; }
+        public DateTime? ExpiresAt { get; set; }
     }
 }

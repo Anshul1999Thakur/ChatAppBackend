@@ -12,7 +12,7 @@ namespace ChatApp.Repositories
         Task<int> CountMembersAsync(string groupId);
         Task RemoveMemberAsync(string groupId, string userId);
         Task UpdateRoleAsync(string groupId, string userId, string newRole);
+        Task SetClearedAtAsync(string groupId, string userId, DateTime clearedAt);
         Task DeleteAllMembersByGroupIdAsync(string groupId);
     }
 }
-

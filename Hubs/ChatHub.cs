@@ -209,6 +209,43 @@ namespace ChatApp.Hubs
             await UserTyping(receiverId, false);
         }
 
+        public async Task ClearChat(string otherUserId, bool clearForEveryone)
+        {
+            var senderId = Context.User.GetUserId();
+            if (string.IsNullOrEmpty(senderId)) return;
+
+            await _messageService.ClearChatAsync(senderId, otherUserId, clearForEveryone);
+
+            var callerConnections = GetUserConnections(senderId);
+            await Clients.Clients(callerConnections).SendAsync("ChatCleared", new { otherUserId, clearForEveryone });
+
+            if (clearForEveryone)
+            {
+                var receiverConnections = GetUserConnections(otherUserId);
+                if (receiverConnections.Count > 0)
+                {
+                    await Clients.Clients(receiverConnections).SendAsync("ChatCleared", new { otherUserId = senderId, clearForEveryone = true });
+                }
+            }
+        }
+
+        public async Task SetDisappearingTimer(string otherUserId, int hours)
+        {
+            var senderId = Context.User.GetUserId();
+            if (string.IsNullOrEmpty(senderId)) return;
+
+            var setting = await _messageService.SetDisappearingMessagesAsync(senderId, otherUserId, hours);
+
+            var callerConnections = GetUserConnections(senderId);
+            await Clients.Clients(callerConnections).SendAsync("ChatSettingsUpdated", new { otherUserId, setting });
+
+            var receiverConnections = GetUserConnections(otherUserId);
+            if (receiverConnections.Count > 0)
+            {
+                await Clients.Clients(receiverConnections).SendAsync("ChatSettingsUpdated", new { otherUserId = senderId, setting });
+            }
+        }
+
         // ==========================================
         // GROUP CHAT REAL-TIME
         // ==========================================
@@ -269,6 +306,37 @@ namespace ChatApp.Hubs
                 userName = senderName,
                 isTyping
             });
+        }
+
+        public async Task ClearGroupChat(string groupId, bool clearForEveryone)
+        {
+            var senderId = Context.User.GetUserId();
+            if (string.IsNullOrEmpty(senderId)) return;
+
+            await _groupMessageService.ClearGroupChatAsync(groupId, senderId, clearForEveryone);
+
+            if (clearForEveryone)
+            {
+                await Clients.Group($"group_{groupId}").SendAsync("GroupChatCleared", new { groupId, clearForEveryone = true });
+            }
+            else
+            {
+                var callerConnections = GetUserConnections(senderId);
+                if (callerConnections.Count > 0)
+                {
+                    await Clients.Clients(callerConnections).SendAsync("GroupChatCleared", new { groupId, clearForEveryone = false });
+                }
+            }
+        }
+
+        public async Task SetGroupDisappearingTimer(string groupId, int hours)
+        {
+            var senderId = Context.User.GetUserId();
+            if (string.IsNullOrEmpty(senderId)) return;
+
+            var setting = await _groupMessageService.SetGroupDisappearingMessagesAsync(groupId, senderId, hours);
+
+            await Clients.Group($"group_{groupId}").SendAsync("GroupSettingsUpdated", new { groupId, setting });
         }
 
         // ==========================================

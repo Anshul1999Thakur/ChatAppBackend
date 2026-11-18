@@ -36,11 +36,13 @@ namespace ChatApp.DTOs
         public string Text { get; set; } = string.Empty;
         public string? StickerUrl { get; set; }
         public bool IsSticker { get; set; }
+        public bool IsSystemMessage { get; set; }
         public DateTime CreatedAt { get; set; }
         public bool IsSeen { get; set; }
         public bool IsDelivered { get; set; }
         public bool IsEdited { get; set; }
         public DateTime? EditedAt { get; set; }
+        public DateTime? ExpiresAt { get; set; }
     }
 
     public class UserContactDto
@@ -54,5 +56,6 @@ namespace ChatApp.DTOs
         public long UnreadCount { get; set; }
         public string LastMessage { get; set; } = string.Empty;
         public DateTime? LastMessageTime { get; set; }
+        public int AutoDeleteDurationHours { get; set; }
     }
 }

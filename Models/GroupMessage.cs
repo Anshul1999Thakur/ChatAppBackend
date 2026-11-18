@@ -29,5 +29,7 @@ namespace ChatApp.Models
         public bool IsEdited { get; set; } = false;
 
         public DateTime? EditedAt { get; set; }
+
+        public DateTime? ExpiresAt { get; set; }
     }
 }

@@ -43,6 +43,12 @@ namespace ChatApp.Services
 
             var sender = await _userRepo.GetByIdAsync(senderId);
 
+            DateTime? expiresAt = null;
+            if (group.AutoDeleteDurationHours > 0)
+            {
+                expiresAt = DateTime.UtcNow.AddHours(group.AutoDeleteDurationHours);
+            }
+
             var message = new GroupMessage
             {
                 GroupId = groupId,
@@ -53,7 +59,8 @@ namespace ChatApp.Services
                 IsSystemMessage = false,
                 CreatedAt = DateTime.UtcNow,
                 IsEdited = false,
-                EditedAt = null
+                EditedAt = null,
+                ExpiresAt = expiresAt
             };
 
             await _messageRepo.CreateAsync(message);
@@ -70,7 +77,8 @@ namespace ChatApp.Services
                 IsSystemMessage = false,
                 CreatedAt = message.CreatedAt,
                 IsEdited = false,
-                EditedAt = null
+                EditedAt = null,
+                ExpiresAt = message.ExpiresAt
             };
         }
 
@@ -89,6 +97,12 @@ namespace ChatApp.Services
 
             var sender = await _userRepo.GetByIdAsync(senderId);
 
+            DateTime? expiresAt = null;
+            if (group.AutoDeleteDurationHours > 0)
+            {
+                expiresAt = DateTime.UtcNow.AddHours(group.AutoDeleteDurationHours);
+            }
+
             var message = new GroupMessage
             {
                 GroupId = groupId,
@@ -100,7 +114,8 @@ namespace ChatApp.Services
                 IsSystemMessage = false,
                 CreatedAt = DateTime.UtcNow,
                 IsEdited = false,
-                EditedAt = null
+                EditedAt = null,
+                ExpiresAt = expiresAt
             };
 
             await _messageRepo.CreateAsync(message);
@@ -117,7 +132,8 @@ namespace ChatApp.Services
                 IsSystemMessage = false,
                 CreatedAt = message.CreatedAt,
                 IsEdited = false,
-                EditedAt = null
+                EditedAt = null,
+                ExpiresAt = message.ExpiresAt
             };
         }
 
@@ -173,7 +189,8 @@ namespace ChatApp.Services
                 IsSystemMessage = message.IsSystemMessage,
                 CreatedAt = message.CreatedAt,
                 IsEdited = message.IsEdited,
-                EditedAt = message.EditedAt
+                EditedAt = message.EditedAt,
+                ExpiresAt = message.ExpiresAt
             };
         }
 
@@ -191,7 +208,7 @@ namespace ChatApp.Services
             if (pageSize < 1) pageSize = 30;
             if (pageSize > 100) pageSize = 100;
 
-            var messages = await _messageRepo.GetGroupHistoryAsync(groupId, page, pageSize);
+            var messages = await _messageRepo.GetGroupHistoryAsync(groupId, page, pageSize, membership.ClearedAt);
 
             var result = new List<GroupMessageDto>(messages.Count);
             foreach (var msg in messages)
@@ -218,11 +235,106 @@ namespace ChatApp.Services
                     IsSystemMessage = msg.IsSystemMessage,
                     CreatedAt = msg.CreatedAt,
                     IsEdited = msg.IsEdited,
-                    EditedAt = msg.EditedAt
+                    EditedAt = msg.EditedAt,
+                    ExpiresAt = msg.ExpiresAt
                 });
             }
 
             return result;
+        }
+
+        public async Task ClearGroupChatAsync(string groupId, string currentUserId, bool clearForEveryone)
+        {
+            var membership = await _memberRepo.GetMembershipAsync(groupId, currentUserId);
+            if (membership == null)
+                throw new ForbiddenException("You are not a member of this group");
+
+            if (clearForEveryone)
+            {
+                if (membership.Role != GroupRole.Owner && membership.Role != GroupRole.Admin)
+                    throw new ForbiddenException("Only group admins or owners can clear chat for everyone");
+
+                await _messageRepo.DeleteAllByGroupIdAsync(groupId);
+            }
+            else
+            {
+                await _memberRepo.SetClearedAtAsync(groupId, currentUserId, DateTime.UtcNow);
+            }
+        }
+
+        public async Task<ConversationSettingDto> SetGroupDisappearingMessagesAsync(string groupId, string currentUserId, int hours)
+        {
+            var membership = await _memberRepo.GetMembershipAsync(groupId, currentUserId);
+            if (membership == null)
+                throw new ForbiddenException("You are not a member of this group");
+
+            if (membership.Role != GroupRole.Owner && membership.Role != GroupRole.Admin)
+                throw new ForbiddenException("Only group admins or owners can change disappearing messages settings");
+
+            if (hours < 0)
+                throw new BadRequestException("Duration hours cannot be negative");
+
+            var group = await _groupRepo.GetByIdAsync(groupId);
+            if (group == null)
+                throw new NotFoundException("Group not found or has been deleted");
+
+            group.AutoDeleteDurationHours = hours;
+            group.AutoDeleteSetBy = currentUserId;
+            group.AutoDeleteSetAt = DateTime.UtcNow;
+
+            await _groupRepo.UpdateAsync(group);
+
+            // WhatsApp announcement system message
+            var caller = await _userRepo.GetByIdAsync(currentUserId);
+            string callerName = caller?.FullName ?? "An admin";
+            string durationText = hours switch
+            {
+                0 => "off",
+                24 => "24 hours",
+                168 => "7 days",
+                2160 => "90 days",
+                _ => $"{hours} hours"
+            };
+
+            string notice = hours == 0
+                ? $"{callerName} turned off disappearing messages."
+                : $"{callerName} set messages to disappear after {durationText}.";
+
+            var sysMsg = new GroupMessage
+            {
+                GroupId = groupId,
+                SenderId = currentUserId,
+                SenderName = callerName,
+                EncryptedText = _crypto.Encrypt(notice),
+                IsSystemMessage = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            await _messageRepo.CreateAsync(sysMsg);
+
+            return new ConversationSettingDto
+            {
+                AutoDeleteDurationHours = hours,
+                AutoDeleteSetBy = currentUserId,
+                AutoDeleteSetAt = DateTime.UtcNow
+            };
+        }
+
+        public async Task<ConversationSettingDto> GetGroupDisappearingMessagesAsync(string groupId, string currentUserId)
+        {
+            var membership = await _memberRepo.GetMembershipAsync(groupId, currentUserId);
+            if (membership == null)
+                throw new ForbiddenException("You are not a member of this group");
+
+            var group = await _groupRepo.GetByIdAsync(groupId);
+            if (group == null)
+                throw new NotFoundException("Group not found or has been deleted");
+
+            return new ConversationSettingDto
+            {
+                AutoDeleteDurationHours = group.AutoDeleteDurationHours,
+                AutoDeleteSetBy = group.AutoDeleteSetBy,
+                AutoDeleteSetAt = group.AutoDeleteSetAt
+            };
         }
     }
 }

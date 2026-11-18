@@ -368,6 +368,59 @@ namespace ChatApp.Controllers
 
             return Ok(updated);
         }
+
+        // ==========================================
+        // CLEAR GROUP CHAT (WhatsApp-style)
+        // ==========================================
+        [HttpPost("{groupId}/clear")]
+        public async Task<IActionResult> ClearGroupChat(string groupId, [FromBody] ClearChatRequestDto? dto)
+        {
+            var currentUserId = User.GetUserId();
+            bool clearForEveryone = dto?.ClearForEveryone ?? false;
+
+            await _groupMessageService.ClearGroupChatAsync(groupId, currentUserId, clearForEveryone);
+
+            if (clearForEveryone)
+            {
+                await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupChatCleared", new { groupId, clearForEveryone = true });
+            }
+            else
+            {
+                var callerConns = ChatHub.GetUserConnections(currentUserId);
+                if (callerConns.Count > 0)
+                {
+                    await _hubContext.Clients.Clients(callerConns).SendAsync("GroupChatCleared", new { groupId, clearForEveryone = false });
+                }
+            }
+
+            return Ok(ApiResponse.Ok("Group chat cleared successfully"));
+        }
+
+        // ==========================================
+        // GET GROUP DISAPPEARING MESSAGES SETTING
+        // ==========================================
+        [HttpGet("{groupId}/disappearing-messages")]
+        public async Task<IActionResult> GetGroupDisappearingMessages(string groupId)
+        {
+            var currentUserId = User.GetUserId();
+            var setting = await _groupMessageService.GetGroupDisappearingMessagesAsync(groupId, currentUserId);
+            return Ok(setting);
+        }
+
+        // ==========================================
+        // UPDATE GROUP DISAPPEARING MESSAGES TIMER
+        // ==========================================
+        [HttpPut("{groupId}/disappearing-messages")]
+        public async Task<IActionResult> SetGroupDisappearingMessages(string groupId, [FromBody] SetDisappearingMessagesDto dto)
+        {
+            var currentUserId = User.GetUserId();
+            var setting = await _groupMessageService.SetGroupDisappearingMessagesAsync(groupId, currentUserId, dto.AutoDeleteDurationHours);
+
+            // Broadcast to group members
+            await _hubContext.Clients.Group($"group_{groupId}").SendAsync("GroupSettingsUpdated", new { groupId, setting });
+
+            return Ok(setting);
+        }
     }
 }
 

@@ -7,8 +7,8 @@ namespace ChatApp.Repositories
         Task CreateAsync(GroupMessage message);
         Task<GroupMessage?> GetByIdAsync(string id);
         Task UpdateAsync(GroupMessage message);
-        Task<List<GroupMessage>> GetGroupHistoryAsync(string groupId, int page, int pageSize);
-        Task<GroupMessage?> GetLastMessageByGroupIdAsync(string groupId);
+        Task<List<GroupMessage>> GetGroupHistoryAsync(string groupId, int page, int pageSize, DateTime? clearedAfter = null);
+        Task<GroupMessage?> GetLastMessageByGroupIdAsync(string groupId, DateTime? clearedAfter = null);
         Task DeleteAllByGroupIdAsync(string groupId);
     }
 }

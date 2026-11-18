@@ -49,6 +49,7 @@ builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
 builder.Services.AddScoped<IGroupRepository, GroupRepository>();
 builder.Services.AddScoped<IGroupMemberRepository, GroupMemberRepository>();
 builder.Services.AddScoped<IGroupMessageRepository, GroupMessageRepository>();
+builder.Services.AddScoped<IConversationSettingRepository, ConversationSettingRepository>();
 
 // ==========================================
 // SERVICES

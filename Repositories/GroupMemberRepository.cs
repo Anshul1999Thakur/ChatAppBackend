@@ -58,10 +58,15 @@ namespace ChatApp.Repositories
             await _context.GroupMembers.UpdateOneAsync(m => m.GroupId == groupId && m.UserId == userId, update);
         }
 
+        public async Task SetClearedAtAsync(string groupId, string userId, DateTime clearedAt)
+        {
+            var update = Builders<GroupMember>.Update.Set(m => m.ClearedAt, clearedAt);
+            await _context.GroupMembers.UpdateOneAsync(m => m.GroupId == groupId && m.UserId == userId, update);
+        }
+
         public async Task DeleteAllMembersByGroupIdAsync(string groupId)
         {
             await _context.GroupMembers.DeleteManyAsync(m => m.GroupId == groupId);
         }
     }
 }
-

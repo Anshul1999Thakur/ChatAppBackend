@@ -87,6 +87,72 @@ namespace ChatApp.Controllers
         }
 
         // =====================================
+        // CLEAR CHAT (WhatsApp-style)
+        // =====================================
+        [HttpPost("clear/{otherUserId}")]
+        public async Task<IActionResult> ClearChat(string otherUserId, [FromBody] ClearChatRequestDto? dto)
+        {
+            var authenticatedId = User.GetUserId();
+            bool clearForEveryone = dto?.ClearForEveryone ?? false;
+
+            await _messageService.ClearChatAsync(authenticatedId, otherUserId, clearForEveryone);
+
+            // SignalR broadcast
+            var callerConns = ChatHub.GetUserConnections(authenticatedId);
+            if (callerConns.Count > 0)
+            {
+                await _hubContext.Clients.Clients(callerConns).SendAsync("ChatCleared", new { otherUserId, clearForEveryone });
+            }
+
+            if (clearForEveryone)
+            {
+                var receiverConns = ChatHub.GetUserConnections(otherUserId);
+                if (receiverConns.Count > 0)
+                {
+                    await _hubContext.Clients.Clients(receiverConns).SendAsync("ChatCleared", new { otherUserId = authenticatedId, clearForEveryone = true });
+                }
+            }
+
+            return Ok(ApiResponse.Ok("Chat cleared successfully"));
+        }
+
+        // =====================================
+        // GET CHAT SETTINGS / DISAPPEARING MESSAGES
+        // =====================================
+        [HttpGet("settings/{otherUserId}")]
+        public async Task<IActionResult> GetChatSettings(string otherUserId)
+        {
+            var authenticatedId = User.GetUserId();
+            var settings = await _messageService.GetChatSettingsAsync(authenticatedId, otherUserId);
+            return Ok(settings);
+        }
+
+        // =====================================
+        // UPDATE DISAPPEARING MESSAGES TIMER
+        // =====================================
+        [HttpPut("settings/{otherUserId}")]
+        public async Task<IActionResult> SetDisappearingMessages(string otherUserId, [FromBody] SetDisappearingMessagesDto dto)
+        {
+            var authenticatedId = User.GetUserId();
+            var updated = await _messageService.SetDisappearingMessagesAsync(authenticatedId, otherUserId, dto.AutoDeleteDurationHours);
+
+            // Broadcast real-time update to both users
+            var callerConns = ChatHub.GetUserConnections(authenticatedId);
+            if (callerConns.Count > 0)
+            {
+                await _hubContext.Clients.Clients(callerConns).SendAsync("ChatSettingsUpdated", new { otherUserId, setting = updated });
+            }
+
+            var receiverConns = ChatHub.GetUserConnections(otherUserId);
+            if (receiverConns.Count > 0)
+            {
+                await _hubContext.Clients.Clients(receiverConns).SendAsync("ChatSettingsUpdated", new { otherUserId = authenticatedId, setting = updated });
+            }
+
+            return Ok(updated);
+        }
+
+        // =====================================
         // CHAT HISTORY (Clean Route)
         // =====================================
         [HttpGet("history/{otherUserId}")]
